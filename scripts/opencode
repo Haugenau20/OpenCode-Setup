@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Host-side wrapper. Starts the compose stack (if not running) and attaches
+# the TUI. Pass any args through to opencode.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${ROOT}"
+
+if [ ! -f .env ]; then
+    echo "no .env found. Copy .env.example to .env and edit it first." >&2
+    exit 1
+fi
+
+# Source PROJECT_SLUG and OPENCODE_PORT for messages.
+# shellcheck disable=SC1091
+set -a; . ./.env; set +a
+PROJECT_SLUG="${PROJECT_SLUG:-default}"
+OPENCODE_PORT="${OPENCODE_PORT:-4096}"
+CONTAINER="opencode-${PROJECT_SLUG}"
+
+if ! docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
+    echo "starting stack (project: ${PROJECT_SLUG})..."
+    docker compose up -d
+fi
+
+echo "web UI: http://localhost:${OPENCODE_PORT}"
+echo "attaching TUI (Ctrl-D to detach)..."
+exec docker exec -it "${CONTAINER}" opencode "$@"

@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# git-guard: refuse remote git operations unless ALLOW_REMOTE_GIT=1.
+# Installed at /usr/local/bin/git (PATH-first), delegates to /usr/bin/git.
+set -euo pipefail
+
+REAL_GIT=/usr/bin/git
+
+case "${1:-}" in
+    push|fetch|pull|clone)
+        if [ "${ALLOW_REMOTE_GIT:-0}" != "1" ]; then
+            cat >&2 <<EOF
+git ${1}: blocked by workplace policy.
+
+Remote git operations are disabled by default in this container. To enable:
+  1. Set ALLOW_REMOTE_GIT=1 in your .env
+  2. docker compose up -d
+See docs/ALLOWING_GIT_PUSH.md for details.
+EOF
+            exit 1
+        fi
+        ;;
+    remote)
+        case "${2:-}" in
+            add|set-url|set-branches|set-head|prune|update)
+                if [ "${ALLOW_REMOTE_GIT:-0}" != "1" ]; then
+                    echo "git remote ${2}: blocked (set ALLOW_REMOTE_GIT=1)" >&2
+                    exit 1
+                fi
+                ;;
+        esac
+        ;;
+esac
+
+exec "${REAL_GIT}" "$@"

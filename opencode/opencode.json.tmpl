@@ -1,0 +1,23 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "theme": "tokyonight",
+  "provider": {
+    "workplace": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Workplace LLM",
+      "options": {
+        "baseURL": "${LLM_API_BASE}",
+        "apiKey": "${LLM_API_KEY}"
+      },
+      "models": {
+        "default": {
+          "name": "default"
+        }
+      }
+    }
+  },
+  "server": {
+    "hostname": "0.0.0.0",
+    "port": 4096
+  }
+}

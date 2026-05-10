@@ -1,0 +1,21 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# Corporate CA — must be supplied at build time, never committed
+ca/*.crt
+ca/*.pem
+ca/*.cer
+!ca/.gitkeep
+
+# Local per-developer extras
+user-layer/
+extra-allowlist.d/*.conf
+!extra-allowlist.d/.gitkeep
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store
