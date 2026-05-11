@@ -1,0 +1,14 @@
+# Placeholder for the workplace RAG MCP server.
+#
+# The real service is not yet deployed. When it is, set `enabled: true`,
+# point `url` at the in-cluster address (it will live on the oc_internal
+# network, no Squid hop), and bump the image tag.
+#
+# Do not enable in its current state; opencode will fail to attach to a
+# server that is not reachable and the error is noisy.
+
+name: rag
+enabled: false
+type: http
+url: http://rag:8080/mcp
+description: Internal knowledge-base retrieval. Disabled until deployed.
