@@ -1,0 +1,18 @@
+name: opencode-${PROJECT_SLUG:-default}
+
+# Overlay: replace the oc_cfg named volume with a host bind mount so the
+# developer can edit agents/skills/commands directly from the host without
+# entering the container.
+#
+# Activated automatically by ./scripts/opencode when USER_LAYER_PATH is set
+# in .env. Apply manually with:
+#   docker compose -f docker-compose.yml -f docker-compose.user-layer.yml up -d
+
+services:
+  opencode:
+    volumes:
+      - type: bind
+        source: ${USER_LAYER_PATH:?USER_LAYER_PATH must be set when using docker-compose.user-layer.yml}
+        target: /home/dev/.config/opencode
+        bind:
+          create_host_path: true

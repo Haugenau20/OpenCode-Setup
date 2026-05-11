@@ -18,9 +18,14 @@ PROJECT_SLUG="${PROJECT_SLUG:-default}"
 OPENCODE_PORT="${OPENCODE_PORT:-4096}"
 CONTAINER="opencode-${PROJECT_SLUG}"
 
+COMPOSE_FILES=(-f docker-compose.yml)
+if [ -n "${USER_LAYER_PATH:-}" ]; then
+    COMPOSE_FILES+=(-f docker-compose.user-layer.yml)
+fi
+
 if ! docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
     echo "starting stack (project: ${PROJECT_SLUG})..."
-    docker compose up -d
+    docker compose "${COMPOSE_FILES[@]}" up -d
 fi
 
 echo "web UI: http://localhost:${OPENCODE_PORT}"

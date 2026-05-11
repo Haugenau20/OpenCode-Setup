@@ -16,18 +16,25 @@ To make editing easy from the host, point `USER_LAYER_PATH` in `.env` to a
 host directory; it gets bind-mounted in place of the named volume.
 
 ```
-USER_LAYER_PATH=~/.opencode-work
+USER_LAYER_PATH=./user-layer
+```
+
+The wrapper at `scripts/opencode` notices the variable and automatically
+layers `docker-compose.user-layer.yml` on top of the base compose file. If
+you bring the stack up by hand, do the same:
+
+```
+docker compose -f docker-compose.yml -f docker-compose.user-layer.yml up -d
 ```
 
 Then on the host:
 
 ```
-mkdir -p ~/.opencode-work/skills
-$EDITOR ~/.opencode-work/skills/my-skill.md
+mkdir -p ./user-layer/skills
+$EDITOR ./user-layer/skills/my-skill.md
 ```
 
-Restart the container (or run `opencode reload` inside it) and the new skill
-shows up.
+Restart the container and the new skill shows up.
 
 ## Disabling something the image ships
 
