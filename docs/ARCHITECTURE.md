@@ -182,3 +182,21 @@ disk.
   already-allowlisted JIRA API.
 - **Desktop-app SSH connect.** Upstream feature request; not relevant while
   the container runs on the same host.
+
+## Verified upstream facts
+
+Checked 2026-05-11 against opencode-ai 1.14.48 (`npm view opencode-ai`).
+
+- **Package name.** `opencode-ai` on the public npm registry. `dist-tags.latest`
+  is `1.14.48`. The Dockerfile pins via the `OPENCODE_VERSION` build arg.
+- **CLI surface.** `opencode serve` exists and accepts `--hostname` (default
+  `127.0.0.1`) and `--port` (default `0` = ephemeral). Confirmed by running
+  `opencode serve --help` against the published binary. `opencode web` is a
+  sibling subcommand that also opens a browser; we use `serve` because the
+  container is headless and the user opens the URL on the host.
+- **Provider schema.** `@ai-sdk/openai-compatible` provider takes
+  `options.baseURL` and `options.apiKey` (plus optional `options.headers`).
+  Matches what `opencode.json.tmpl` renders. Reference:
+  https://opencode.ai/docs/providers/ and https://opencode.ai/docs/config/
+  (both pages 403 to unauthenticated fetchers but are reachable from a
+  browser).
