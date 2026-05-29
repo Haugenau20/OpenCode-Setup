@@ -139,6 +139,30 @@ To add an entry yourself, see "Per-developer allowlist additions" in the
 top-level [README](../README.md). Or open a PR if it should ship to
 everyone.
 
+## Squid won't start: `ACL 'allowed_dst' already exists with different type`
+
+```
+aclParseAclLine: ACL 'allowed_dst' already exists with different type.
+FATAL: Bungled .../allowlist.d/10-bitbucket.conf line N: acl allowed_dst port 7990
+```
+
+You added a `port` (or other non-`dstdomain`) ACL reusing the name
+`allowed_dst`. Squid allows reusing a name only with the **same** type, so
+`dstdomain` + `port` is fatal. Ports are not configured in `allowlist.d/` at
+all — those files are `dstdomain` only.
+
+To allow git/HTTPS to a non-standard TLS port (Bitbucket's default is 7990),
+add it to `SSL_ports` in `squid/squid.conf` (already shipped for 7990 and
+8443), not to the allowlist:
+
+```
+acl SSL_ports port 7990
+```
+
+Without that, `http_access deny CONNECT !SSL_ports` blocks the `CONNECT`
+tunnel and clones/pushes fail. Then `docker compose build squid && docker
+compose up -d squid`.
+
 ## Container won't start, exit code from entrypoint
 
 ```

@@ -20,6 +20,13 @@ egress to that set. Renaming the ACL in any file (e.g. to `allowed_dst_jira`)
 breaks access for everything in that file. Only edit the domain value after
 `dstdomain`.
 
+These files hold `dstdomain` ACLs **only**. Do not add `acl allowed_dst port
+...` (or any other ACL type) — squid rejects reusing a name with a different
+type (`ACL 'allowed_dst' already exists with different type`, which is fatal).
+Ports are configured in `squid.conf`: a non-standard TLS port that git/HTTPS
+needs to `CONNECT` to (e.g. Bitbucket on 7990) must be listed in `SSL_ports`
+there, not here.
+
 ## Per-developer additions
 
 Developers can add their own entries without rebuilding the image. Drop a
