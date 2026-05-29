@@ -25,14 +25,16 @@ depend on shifting upstream defaults:
 ```json
 "permission": {
   "edit": "allow",
-  "webfetch": "allow",
+  "webfetch": "deny",
   "bash": "allow"
 }
 ```
 
 This is safe because the container is already the security boundary: egress
 is forced through the Squid allowlist and remote git is gated by
-`git-guard`. If you still get denials, you're probably on an old image or a
+`git-guard`. `webfetch` is `deny` on purpose — the Squid proxy blocks
+arbitrary outbound HTTP anyway, so there's no reason to let an agent think
+it can reach the open internet. If you still get denials, you're probably on an old image or a
 project-level `opencode.json` in `/workspace` is overriding the shipped one
 (see "LLM API errors" below) — rebuild with `docker compose build opencode`
 and check for a repo-root config.
