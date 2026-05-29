@@ -30,4 +30,12 @@ fi
 
 echo "web UI: http://localhost:${OPENCODE_PORT}"
 echo "attaching TUI (Ctrl-D to detach)..."
-exec docker exec -it "${CONTAINER}" opencode "$@"
+# Attach as the non-root `dev` user with a matching HOME/XDG so opencode reads
+# /home/dev/.config/opencode (where the bundle lives). The image's default user
+# is root, and a root opencode would read root's empty config dir instead.
+exec docker exec -u dev \
+    -e HOME=/home/dev \
+    -e XDG_CONFIG_HOME=/home/dev/.config \
+    -e XDG_DATA_HOME=/home/dev/.local/share \
+    -w /workspace \
+    -it "${CONTAINER}" opencode "$@"

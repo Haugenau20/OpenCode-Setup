@@ -49,6 +49,10 @@ symlink_bundle() {
     local dst="${USER_CFG}/${kind}"
     [ -d "${src}" ] || return 0
 
+    # Drop dangling symlinks left by an earlier image/bundle layout. The config
+    # dir is a persistent volume, so stale links survive rebuilds otherwise.
+    find "${dst}" -maxdepth 1 -xtype l -delete 2>/dev/null || true
+
     local disabled
     disabled="$(disabled_for "${kind}" | tr '\n' ' ')"
 
@@ -147,6 +151,14 @@ EOF
 chown "${HOST_UID}:${HOST_GID}" /home/dev/.bashrc
 
 # ---- 9. Hand off to opencode -------------------------------------------------
+# gosu drops privileges but does NOT reset the environment, so $HOME would stay
+# /root (the entrypoint runs as root). opencode resolves its *global config dir*
+# (~/.config/opencode, where the bundle is symlinked) from $HOME / $XDG_*, so
+# without this the dev process reads root's empty config and no bundled
+# agents/skills/commands load — even though OPENCODE_CONFIG pins the provider.
+export HOME=/home/dev
+export XDG_CONFIG_HOME=/home/dev/.config
+export XDG_DATA_HOME=/home/dev/.local/share
 log "starting opencode: $*"
 exec gosu dev opencode "$@" \
     --hostname 0.0.0.0 \
