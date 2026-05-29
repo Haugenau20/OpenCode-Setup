@@ -72,11 +72,35 @@ for kind in agents skills commands mcp; do
     symlink_bundle "${kind}"
 done
 
-# ---- 4. Render opencode.json from template -----------------------------------
+# ---- 4. Provision LLM credentials + config -----------------------------------
+# opencode's {env:...} substitution is unreliable for apiKey in custom providers
+# (upstream bug), so we write the credentials to root-owned-then-dev 0600 files
+# and reference them from opencode.json via {file:...}, which works reliably.
 : "${LLM_API_BASE:?LLM_API_BASE not set}"
 : "${LLM_API_KEY:?LLM_API_KEY not set}"
 
-envsubst < /etc/opencode/opencode.json.tmpl > "${USER_CFG}/opencode.json"
+# Strip a single layer of surrounding quotes and any surrounding whitespace that
+# may have leaked in from .env (docker env_file keeps quotes/spaces literally).
+trim() {
+    local v="$1"
+    v="${v#"${v%%[![:space:]]*}"}"   # leading ws
+    v="${v%"${v##*[![:space:]]}"}"   # trailing ws
+    v="${v#\"}"; v="${v%\"}"          # surrounding double quotes
+    v="${v#\'}"; v="${v%\'}"          # surrounding single quotes
+    printf '%s' "$v"
+}
+
+SECRETS_DIR=/home/dev/secrets
+mkdir -p "${SECRETS_DIR}"
+printf '%s' "$(trim "${LLM_API_BASE}")" > "${SECRETS_DIR}/llm_api_base"
+printf '%s' "$(trim "${LLM_API_KEY}")"  > "${SECRETS_DIR}/llm_api_key"
+chmod 600 "${SECRETS_DIR}/llm_api_base" "${SECRETS_DIR}/llm_api_key"
+chown -R "${HOST_UID}:${HOST_GID}" "${SECRETS_DIR}"
+
+# Ship the static config into the global config dir (alongside bundle symlinks)
+# and pin it explicitly so opencode loads exactly this file.
+cp /etc/opencode/opencode.json "${USER_CFG}/opencode.json"
+export OPENCODE_CONFIG="${USER_CFG}/opencode.json"
 
 # ---- 5. Session logs: tmpfs swap if disabled ---------------------------------
 STATE_DIR=/home/dev/.local/share/opencode

@@ -35,6 +35,60 @@ ss -ltnp | grep :4096
 
 Set a different `OPENCODE_PORT` in `.env` if 4096 is taken.
 
+## Can't reach http://localhost:4096
+
+Work through this ladder in order:
+
+1. Confirm the container is up:
+
+   ```
+   docker compose ps
+   ```
+
+   The `opencode` service should show "Up".
+
+2. Confirm the server started without crashing:
+
+   ```
+   docker compose logs opencode | tail -n 30
+   ```
+
+   Look for the `starting opencode: serve` line and no stack trace after it.
+
+3. Confirm it is listening inside the container on `0.0.0.0:4096` (not
+   `127.0.0.1:4096`):
+
+   ```
+   docker exec opencode-<slug> ss -ltnp | grep 4096
+   ```
+
+4. Confirm the published port is bound on the host:
+
+   ```
+   ss -ltnp | grep 4096
+   ```
+
+   Expect `127.0.0.1:4096`.
+
+5. Test from the host while bypassing any corporate proxy — this is the most
+   common cause in airgapped environments. Your shell likely exports
+   `HTTP_PROXY`/`HTTPS_PROXY`, so `curl` routes the request through the corp
+   proxy, which refuses it:
+
+   ```
+   curl -sv --noproxy '*' http://localhost:4096
+   ```
+
+   If this works but a browser does not, add `localhost,127.0.0.1` to the
+   browser or OS no-proxy settings.
+
+6. Keep `OPENCODE_PORT=4096`. The web/desktop frontend hardcodes port 4096 in
+   its API calls (upstream bug), so remapping the host port leaves the page
+   loading but unable to reach the backend.
+
+7. Squid is irrelevant here — it only governs the container's outbound traffic;
+   inbound published ports do not go through it.
+
 ## Git push refused: "set ALLOW_REMOTE_GIT=1"
 
 That's the safety gate doing its job. See
@@ -47,6 +101,31 @@ after the maintainer drops the CA in `ca/`.
 
 If you're the maintainer and just added the CA: `docker compose build
 --no-cache opencode`.
+
+## LLM API errors / 'Unauthorized' when prompting a model
+
+Credentials are written at container start to `/home/dev/secrets/llm_api_base`
+and `/home/dev/secrets/llm_api_key` (mode 0600, owned by the `dev` user) and
+referenced from `opencode.json` via `{file:...}`. Verify the values landed
+cleanly:
+
+```
+docker exec opencode-<slug> cat /home/dev/secrets/llm_api_key
+```
+
+If the output contains stray quotes or whitespace, they leaked in from `.env`
+(docker `env_file` passes quote characters literally). Remove them from `.env`
+— the entrypoint strips one layer of surrounding quotes/whitespace, but nested
+or mismatched quoting can still slip through.
+
+opencode merges config files in order of precedence, and a project-level
+`opencode.json` or `opencode.jsonc` in your mounted repo (`/workspace`) will
+**override** the shipped config. If prompts are hitting the wrong provider,
+check for such a file at the repo root.
+
+The shipped config path is pinned via the `OPENCODE_CONFIG` environment
+variable set by the entrypoint, so opencode loads exactly
+`~/.config/opencode/opencode.json` rather than auto-discovering one.
 
 ## Squid is blocking something I need
 

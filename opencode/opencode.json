@@ -6,8 +6,8 @@
       "npm": "@ai-sdk/openai-compatible",
       "name": "Workplace LLM",
       "options": {
-        "baseURL": "${LLM_API_BASE}",
-        "apiKey": "${LLM_API_KEY}"
+        "baseURL": "{file:/home/dev/secrets/llm_api_base}",
+        "apiKey": "{file:/home/dev/secrets/llm_api_key}"
       },
       "models": {
         "default": {

@@ -24,6 +24,10 @@ if [ -f .env ]; then
             ok "${var} set"
         fi
     done
+
+    if [ -n "${OPENCODE_PORT:-}" ] && [ "${OPENCODE_PORT}" != "4096" ]; then
+        warn "OPENCODE_PORT=${OPENCODE_PORT} — the opencode web/desktop UI hardcodes port 4096 in its API calls; remapping the host port breaks the UI even though the server is up. Keep OPENCODE_PORT=4096."
+    fi
 else
     bad ".env missing (cp .env.example .env)"
 fi
@@ -65,6 +69,12 @@ if docker ps --format '{{.Names}}' | grep -qx "opencode-${PROJECT_SLUG}"; then
         ok "squid reachable from opencode (got a response from LLM host)"
     else
         warn "could not reach LLM host through squid (check allowlist + CA)"
+    fi
+
+    if curl -sS --noproxy '*' --max-time 5 -o /dev/null -w '%{http_code}' "http://localhost:${OPENCODE_PORT:-4096}" 2>/dev/null | grep -qE '^(200|401|403)$'; then
+        ok "opencode server reachable on host port ${OPENCODE_PORT:-4096}"
+    else
+        warn "opencode server not reachable on host localhost:${OPENCODE_PORT:-4096} (see TROUBLESHOOTING: Can't reach localhost:4096)"
     fi
 else
     warn "stack not running (docker compose up -d)"

@@ -13,6 +13,13 @@ entries. They are concatenated into the running squid config via
 Replace the example hostnames with the real internal ones before building
 the production image.
 
+The ACL name `allowed_dst` must stay exactly that in every file. Squid merges
+all `acl allowed_dst dstdomain ...` lines across files into one set, and the
+single `http_access allow localnet allowed_dst` rule in `squid.conf` grants
+egress to that set. Renaming the ACL in any file (e.g. to `allowed_dst_jira`)
+breaks access for everything in that file. Only edit the domain value after
+`dstdomain`.
+
 ## Per-developer additions
 
 Developers can add their own entries without rebuilding the image. Drop a

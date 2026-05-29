@@ -45,7 +45,7 @@ RUN npm install -g opencode-ai@${OPENCODE_VERSION} \
 # Workplace bundle (agents/skills/commands/mcp) — read-only.
 COPY opencode/bundle/ /opt/opencode/bundle/
 COPY opencode/policy.yaml /etc/opencode/policy.yaml
-COPY opencode/opencode.json.tmpl /etc/opencode/opencode.json.tmpl
+COPY opencode/opencode.json /etc/opencode/opencode.json
 
 # git-guard: block remote git ops unless ALLOW_REMOTE_GIT=1.
 COPY opencode/git-guard /usr/local/bin/git-guard
