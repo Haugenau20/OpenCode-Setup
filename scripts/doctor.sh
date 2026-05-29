@@ -97,5 +97,51 @@ else
 fi
 
 echo
+echo "== opencode config resolution =="
+CONTAINER="opencode-${PROJECT_SLUG}"
+CFG=/home/dev/.config/opencode
+if docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
+    # opencode resolves its global config DIR (agents/skills/commands) from
+    # $HOME, independently of the OPENCODE_CONFIG file pin. The server runs as
+    # `dev` via gosu, which does NOT reset $HOME, so $HOME must be exported to
+    # /home/dev explicitly. If it's /root, the LLM still works (provider comes
+    # from the pinned opencode.json) but NO bundled agents/skills/commands load.
+    srv_home="$(docker exec "${CONTAINER}" \
+        sh -c "tr '\0' '\n' < /proc/1/environ | sed -n 's/^HOME=//p'" 2>/dev/null)"
+    if [ "${srv_home}" = "/home/dev" ]; then
+        ok "server \$HOME=${srv_home} (opencode reads ${CFG})"
+    elif [ -z "${srv_home}" ]; then
+        warn "could not read server \$HOME from /proc/1/environ"
+    else
+        bad "server \$HOME=${srv_home} — opencode is reading ${srv_home}/.config/opencode, not ${CFG}; bundled agents/skills/commands will NOT load. Pull the HOME fix and rebuild (docker compose up -d --build)."
+    fi
+
+    # Each bundled kind must have at least one entry that resolves to a real
+    # file. `find -L` follows symlinks and skips broken ones, so this also
+    # catches dangling links left by an older bundle layout.
+    for kind in agents commands; do
+        n="$(docker exec "${CONTAINER}" \
+            find -L "${CFG}/${kind}" -maxdepth 1 -type f 2>/dev/null | wc -l)"
+        if [ "${n:-0}" -gt 0 ]; then
+            ok "${kind}: ${n} resolvable item(s) under ${CFG}/${kind}"
+        else
+            warn "${kind}: nothing resolvable under ${CFG}/${kind}"
+        fi
+    done
+
+    # Skills are directories containing SKILL.md; a flat skills/<name>.md is
+    # silently ignored by opencode.
+    sk="$(docker exec "${CONTAINER}" \
+        find -L "${CFG}/skills" -maxdepth 2 -name SKILL.md 2>/dev/null | wc -l)"
+    if [ "${sk:-0}" -gt 0 ]; then
+        ok "skills: ${sk} skill(s) with SKILL.md under ${CFG}/skills"
+    else
+        warn "skills: no <name>/SKILL.md under ${CFG}/skills (a flat skills/<name>.md is ignored by opencode)"
+    fi
+else
+    warn "stack not running — skipping config-resolution checks"
+fi
+
+echo
 [ "${fail}" -eq 0 ] && echo "all checks passed." || echo "some checks failed."
 exit "${fail}"
