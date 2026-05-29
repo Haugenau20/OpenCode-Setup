@@ -11,10 +11,37 @@ Most setup mistakes are caught by:
 Run it before opening a ticket. It checks `.env`, the corp CA, and squid
 reachability.
 
+## Agents hit `PermissionDenied: FileSystem.writeFile` / can't edit or run commands
+
+This is **opencode's own permission layer**, not a Linux file permission —
+the tell is that even writes to `/tmp` are refused, and there's no UID fix
+that helps. It happens because opencode's built-in per-agent defaults treat
+`edit`/`bash` as `"ask"` for most agents, and we run headless (`opencode
+serve`) where an unanswered `"ask"` resolves to a denial.
+
+The shipped `opencode/opencode.json` pins an explicit policy so this can't
+depend on shifting upstream defaults:
+
+```json
+"permission": {
+  "edit": "allow",
+  "webfetch": "allow",
+  "bash": "allow"
+}
+```
+
+This is safe because the container is already the security boundary: egress
+is forced through the Squid allowlist and remote git is gated by
+`git-guard`. If you still get denials, you're probably on an old image or a
+project-level `opencode.json` in `/workspace` is overriding the shipped one
+(see "LLM API errors" below) — rebuild with `docker compose build opencode`
+and check for a repo-root config.
+
 ## "permission denied" on files in `/workspace`
 
 You're hitting a UID mismatch between the host and the container's `dev`
-user. Make sure `.env` has:
+user (a Linux ownership problem — distinct from the opencode permission
+layer above). Make sure `.env` has:
 
 ```
 HOST_UID=$(id -u)

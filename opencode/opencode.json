@@ -19,5 +19,10 @@
   "server": {
     "hostname": "0.0.0.0",
     "port": 4096
+  },
+  "permission": {
+    "edit": "allow",
+    "webfetch": "allow",
+    "bash": "allow"
   }
 }
