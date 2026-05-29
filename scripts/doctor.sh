@@ -28,6 +28,16 @@ if [ -f .env ]; then
     if [ -n "${OPENCODE_PORT:-}" ] && [ "${OPENCODE_PORT}" != "4096" ]; then
         warn "OPENCODE_PORT=${OPENCODE_PORT} — the opencode web/desktop UI hardcodes port 4096 in its API calls; remapping the host port breaks the UI even though the server is up. Keep OPENCODE_PORT=4096."
     fi
+
+    # Inline `# comment` after a value is kept literally by some docker compose
+    # / .env parsers, which silently mangles interpolated settings — e.g. it
+    # drops the published port so localhost:4096 becomes unreachable. (Note: the
+    # bash `. ./.env` above strips these, so the checks above can't catch it —
+    # we scan the raw file.)
+    if inline_comments="$(grep -nE '^[A-Za-z_][A-Za-z0-9_]*=[^#]*[[:space:]]#' .env)"; then
+        bad "inline '#' comments in .env — move them to their own lines (see TROUBLESHOOTING):"
+        printf '       %s\n' "${inline_comments}"
+    fi
 else
     bad ".env missing (cp .env.example .env)"
 fi

@@ -62,13 +62,33 @@ Work through this ladder in order:
    docker exec opencode-<slug> ss -ltnp | grep 4096
    ```
 
-4. Confirm the published port is bound on the host:
+4. Confirm Docker actually published the port. `docker ps` should show
+   `127.0.0.1:4096->4096/tcp` — **not** a bare `4096/tcp` (that is only the
+   Dockerfile `EXPOSE`, meaning nothing is published):
 
    ```
-   ss -ltnp | grep 4096
+   docker ps --format '{{.Names}}\t{{.Ports}}' | grep opencode
+   ss -ltnp | grep 4096          # host should show 127.0.0.1:4096 listening
    ```
 
-   Expect `127.0.0.1:4096`.
+   If the mapping is missing, check how Compose resolved it:
+
+   ```
+   docker compose config | grep -A3 'ports:'
+   ```
+
+   A correct mapping has a `published: "4096"` line. If `published:` is absent,
+   the value of `OPENCODE_PORT` is malformed — almost always an **inline `#`
+   comment in `.env`**. Some `docker compose` parsers keep `4096   # comment` as
+   the literal value, so the host-port token is garbage and Compose drops the
+   publish. Fix `.env` so the line is just `OPENCODE_PORT=4096` (comment on its
+   own line), then `docker compose up -d --force-recreate opencode`. Run
+   `./scripts/doctor.sh` — it now flags inline comments in `.env`.
+
+   Note: this is unrelated to the `internal: true` networks. Published ports
+   work fine from internal-only networks — the host reaches the container via
+   the internal bridge's gateway address; `internal: true` only removes the
+   container's *outbound* route. You do not need to make any network external.
 
 5. Test from the host while bypassing any corporate proxy — this is the most
    common cause in airgapped environments. Your shell likely exports
