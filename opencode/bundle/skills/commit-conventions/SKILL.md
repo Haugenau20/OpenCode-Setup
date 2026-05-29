@@ -1,4 +1,5 @@
 ---
+name: commit-conventions
 description: House commit-message conventions. Conventional Commits with a small set of allowed types.
 ---
 

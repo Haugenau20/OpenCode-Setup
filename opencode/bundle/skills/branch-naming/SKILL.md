@@ -1,4 +1,5 @@
 ---
+name: branch-naming
 description: House branch-naming rules. Kind, optional Jira key, short slug.
 ---
 

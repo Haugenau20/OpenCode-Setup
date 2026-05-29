@@ -30,11 +30,23 @@ docker compose -f docker-compose.yml -f docker-compose.user-layer.yml up -d
 Then on the host:
 
 ```
-mkdir -p ./user-layer/skills
-$EDITOR ./user-layer/skills/my-skill.md
+mkdir -p ./user-layer/skills/my-skill
+$EDITOR ./user-layer/skills/my-skill/SKILL.md
 ```
 
-Restart the container and the new skill shows up.
+A skill is a *directory* containing a `SKILL.md`. The frontmatter must carry a
+`name` that matches the directory (`my-skill` here) plus a `description`:
+
+```yaml
+---
+name: my-skill
+description: One line describing when this skill applies.
+---
+```
+
+Agents and commands, by contrast, are flat `<name>.md` files in
+`./user-layer/{agents,commands}/`. Restart the container and the new item shows
+up.
 
 ## Disabling something the image ships
 
