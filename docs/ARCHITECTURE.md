@@ -29,19 +29,28 @@ canonical reference; if the code disagrees with this document, fix one of them.
 │   • Browser    ─► http://localhost:${OPENCODE_PORT:-4096}          │
 │   • Desktop    ─► same URL (installed on host, points at container)│
 │   • TUI        ─► ./scripts/opencode (wraps docker exec)           │
-│                                                                    │
+│            │                                                       │
+│            │ localhost:4096 (published by oc-publish)              │
+│            ▼                                                       │
 │  ┌── docker compose project: opencode-${PROJECT_SLUG} ───────────┐ │
 │  │                                                               │ │
 │  │  net: oc_internal  (internal: true, no gateway)               │ │
 │  │  net: oc_proxy     (internal: true)                           │ │
+│  │  net: oc_publish   (non-internal, host-facing)                │ │
 │  │                                                               │ │
-│  │  ┌──────────────┐         ┌──────────────┐                    │ │
-│  │  │  opencode    │─────────│   squid      │── net: oc_egress ──┼─┼──► allowlist
-│  │  │  server      │ oc_proxy│  allowlist   │                    │ │   • LLM API
-│  │  │  :4096       │         │  + corp CA   │                    │ │   • Bitbucket
-│  │  └──────┬───────┘         └──────────────┘                    │ │   • JIRA
-│  │         │ oc_internal                                         │ │
-│  │         │ (reserved for future MCP/RAG sidecars)              │ │
+│  │  ┌──────────────┐  oc_proxy  ┌──────────────┐                │ │
+│  │  │  opencode    │────────────│   squid      │─ oc_egress ────┼─┼──► allowlist
+│  │  │  server      │            │  allowlist   │                │ │   • LLM API
+│  │  │  :4096       │            │  + corp CA   │                │ │   • Bitbucket
+│  │  └──────┬───────┘            └──────────────┘                │ │   • JIRA
+│  │         │ oc_internal                                        │ │
+│  │         │ (reserved for future MCP/RAG sidecars)             │ │
+│  │                                                              │ │
+│  │  ┌──────────────┐  oc_proxy                                  │ │
+│  │  │  oc-publish  │◄──── TCP:opencode:4096                     │ │
+│  │  │  socat fwd   │  oc_publish (non-internal)                 │ │
+│  │  │  :4096 pub.  │◄──────────────────── host :4096            │ │
+│  │  └──────────────┘                                            │ │
 │  │                                                               │ │
 │  │  Volumes:                                                     │ │
 │  │   oc_state_${SLUG}    ─► /home/dev/.local/share/opencode      │ │
@@ -51,13 +60,14 @@ canonical reference; if the code disagrees with this document, fix one of them.
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-### Why these three networks
+### Why these four networks
 
-| Network        | `internal` | Members            | Purpose                              |
-|----------------|------------|--------------------|--------------------------------------|
-| `oc_internal`  | yes        | opencode (+future) | No egress. Reserved for the RAG MCP server and any other internal-only sidecars we add later. |
-| `oc_proxy`     | yes        | opencode, squid    | The only path opencode has to the outside world. |
-| `oc_egress`    | no         | squid              | Squid's view of the internet.        |
+| Network        | `internal` | Members              | Purpose                              |
+|----------------|------------|----------------------|--------------------------------------|
+| `oc_internal`  | yes        | opencode (+future)   | No egress. Reserved for the RAG MCP server and any other internal-only sidecars we add later. |
+| `oc_proxy`     | yes        | opencode, squid, oc-publish | The only path opencode has to the outside world. |
+| `oc_egress`    | no         | squid                | Squid's view of the internet.        |
+| `oc_publish`   | no         | oc-publish           | Lets the publisher sidecar expose opencode's port to the host without giving opencode egress. |
 
 Because `oc_internal` and `oc_proxy` are both `internal: true`, opencode has
 no default route to the internet. The only way out is to make an HTTP request
@@ -67,9 +77,15 @@ that resolves via the proxy env vars and goes through Squid.
 
 OpenCode has a client/server architecture: a single backend serves the TUI,
 the web UI, and the desktop app simultaneously over HTTP + SSE. We ship one
-image that runs `opencode serve` and publish the port to localhost. The
-developer chooses which frontend to use; they all share the same session and
-state.
+image that runs `opencode serve`. The developer chooses which frontend to use;
+they all share the same session and state.
+
+Because `opencode` is attached only to `internal: true` networks (to prevent
+egress), Docker Engine 28+ refuses to bind published host ports for it. The
+`oc-publish` sidecar (a minimal `socat` forwarder using the squid image) sits
+on the non-internal `oc_publish` bridge and forwards
+`localhost:4096 -> opencode:4096` over `oc_proxy`. This gives the host a
+reachable port without granting opencode any network egress.
 
 The desktop app is installed by the developer on their own host (it is an
 Electron app). It connects to `http://localhost:${OPENCODE_PORT}` exactly

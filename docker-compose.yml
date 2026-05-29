@@ -29,8 +29,6 @@ services:
       - ${REPO_PATH:-./repo}:/workspace
       - oc_state:/home/dev/.local/share/opencode
       - oc_cfg:/home/dev/.config/opencode
-    ports:
-      - "127.0.0.1:${OPENCODE_PORT:-4096}:4096"
     networks:
       - oc_internal
       - oc_proxy
@@ -43,6 +41,26 @@ services:
       - DAC_OVERRIDE
     stdin_open: true
     tty: true
+
+  # Publisher sidecar: opencode runs on internal-only networks (no egress), so
+  # modern Docker won't bind its published port on the host. This minimal socat
+  # forwarder lives on a normal (non-internal) bridge — so ITS port can be
+  # published — plus oc_proxy, so it can reach opencode. It only forwards
+  # 4096 -> opencode:4096; it is not an open proxy and grants opencode no egress.
+  oc-publish:
+    image: ${IMAGE_REGISTRY:-opencode-workplace}-squid:${IMAGE_TAG:-local}
+    container_name: opencode-publish-${PROJECT_SLUG:-default}
+    hostname: oc-publish
+    depends_on:
+      - opencode
+    entrypoint: ["socat"]
+    command: ["TCP-LISTEN:4096,fork,reuseaddr", "TCP:opencode:4096"]
+    ports:
+      - "127.0.0.1:${OPENCODE_PORT:-4096}:4096"
+    networks:
+      - oc_proxy
+      - oc_publish
+    restart: unless-stopped
 
   squid:
     image: ${IMAGE_REGISTRY:-opencode-workplace}-squid:${IMAGE_TAG:-local}
@@ -72,6 +90,8 @@ networks:
     driver: bridge
     internal: true
   oc_egress:
+    driver: bridge
+  oc_publish:
     driver: bridge
 
 volumes:

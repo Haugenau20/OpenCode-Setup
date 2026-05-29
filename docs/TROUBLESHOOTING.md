@@ -62,33 +62,36 @@ Work through this ladder in order:
    docker exec opencode-<slug> ss -ltnp | grep 4096
    ```
 
-4. Confirm Docker actually published the port. `docker ps` should show
-   `127.0.0.1:4096->4096/tcp` — **not** a bare `4096/tcp` (that is only the
-   Dockerfile `EXPOSE`, meaning nothing is published):
+4. Confirm the publisher sidecar is publishing the port. The host port is
+   exposed by the `oc-publish` socat forwarder, **not** by `opencode` itself
+   (opencode is on internal-only networks and Docker 28+ won't bind host ports
+   there — this is intentional to preserve the no-egress guarantee):
 
    ```
    docker ps --format '{{.Names}}\t{{.Ports}}' | grep opencode
    ss -ltnp | grep 4096          # host should show 127.0.0.1:4096 listening
    ```
 
-   If the mapping is missing, check how Compose resolved it:
+   You should see `opencode-publish-<slug>` with `127.0.0.1:4096->4096/tcp`,
+   while `opencode-<slug>` correctly shows only `4096/tcp` (internal by design).
+
+   If `opencode-publish-<slug>` is missing from `docker ps`, the sidecar is
+   not running: `docker compose up -d oc-publish`.
+
+   If the sidecar is up but you get connection refused, check it can reach
+   opencode:
 
    ```
-   docker compose config | grep -A3 'ports:'
+   docker logs opencode-publish-<slug>
+   docker exec opencode-publish-<slug> socat -T2 - TCP:opencode:4096 </dev/null
    ```
 
-   A correct mapping has a `published: "4096"` line. If `published:` is absent,
-   the value of `OPENCODE_PORT` is malformed — almost always an **inline `#`
-   comment in `.env`**. Some `docker compose` parsers keep `4096   # comment` as
-   the literal value, so the host-port token is garbage and Compose drops the
+   If the port mapping itself is missing from `docker compose config`, check
+   for an **inline `#` comment in `.env`** on the `OPENCODE_PORT` line — some
+   parsers keep `4096   # comment` as the literal value and Compose drops the
    publish. Fix `.env` so the line is just `OPENCODE_PORT=4096` (comment on its
-   own line), then `docker compose up -d --force-recreate opencode`. Run
-   `./scripts/doctor.sh` — it now flags inline comments in `.env`.
-
-   Note: this is unrelated to the `internal: true` networks. Published ports
-   work fine from internal-only networks — the host reaches the container via
-   the internal bridge's gateway address; `internal: true` only removes the
-   container's *outbound* route. You do not need to make any network external.
+   own line), then `docker compose up -d --force-recreate oc-publish`. Run
+   `./scripts/doctor.sh` — it flags inline comments in `.env`.
 
 5. Test from the host while bypassing any corporate proxy — this is the most
    common cause in airgapped environments. Your shell likely exports

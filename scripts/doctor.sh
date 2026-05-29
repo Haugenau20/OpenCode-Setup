@@ -81,6 +81,12 @@ if docker ps --format '{{.Names}}' | grep -qx "opencode-${PROJECT_SLUG}"; then
         warn "could not reach LLM host through squid (check allowlist + CA)"
     fi
 
+    if docker ps --format '{{.Names}}' | grep -qx "opencode-publish-${PROJECT_SLUG}"; then
+        ok "publisher sidecar running"
+    else
+        warn "publisher sidecar (opencode-publish-${PROJECT_SLUG}) not running — host localhost:${OPENCODE_PORT:-4096} will be unreachable"
+    fi
+
     if curl -sS --noproxy '*' --max-time 5 -o /dev/null -w '%{http_code}' "http://localhost:${OPENCODE_PORT:-4096}" 2>/dev/null | grep -qE '^(200|401|403)$'; then
         ok "opencode server reachable on host port ${OPENCODE_PORT:-4096}"
     else
