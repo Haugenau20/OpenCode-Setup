@@ -26,7 +26,10 @@ services:
       no_proxy: "localhost,127.0.0.1,::1,opencode,squid,rag,.local"
       OPENCODE_INTERNAL_PORT: "4096"
     volumes:
-      - ${REPO_PATH:-./repo}:/workspace
+      # :z relabels the bind-mounted repo for SELinux (shared label). Without it,
+      # an enforcing host denies the container access to /workspace. Named volumes
+      # below are auto-labelled by Docker and need no flag.
+      - ${REPO_PATH:-./repo}:/workspace:z
       - oc_state:/home/dev/.local/share/opencode
       - oc_cfg:/home/dev/.config/opencode
     networks:
@@ -72,12 +75,9 @@ services:
     volumes:
       # Per-developer allowlist additions. Drop *.conf files into
       # ./extra-allowlist.d/ on the host (gitignored) and restart squid.
-      - type: bind
-        source: ./extra-allowlist.d
-        target: /etc/squid/extra-allowlist.d
-        read_only: true
-        bind:
-          create_host_path: true
+      # ro,z = read-only + shared SELinux relabel (z, not Z: the same host dir is
+      # mounted into every project's squid, so it must share one label).
+      - ./extra-allowlist.d:/etc/squid/extra-allowlist.d:ro,z
     networks:
       - oc_proxy
       - oc_egress
