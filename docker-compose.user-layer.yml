@@ -11,8 +11,5 @@ name: opencode-${PROJECT_SLUG:-default}
 services:
   opencode:
     volumes:
-      - type: bind
-        source: ${USER_LAYER_PATH:?USER_LAYER_PATH must be set when using docker-compose.user-layer.yml}
-        target: /home/dev/.config/opencode
-        bind:
-          create_host_path: true
+      # :z relabels the bind-mounted user layer for SELinux (shared label).
+      - ${USER_LAYER_PATH:?USER_LAYER_PATH must be set when using docker-compose.user-layer.yml}:/home/dev/.config/opencode:z
