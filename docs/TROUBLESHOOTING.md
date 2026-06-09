@@ -141,6 +141,50 @@ Work through this ladder in order:
 7. Squid is irrelevant here — it only governs the container's outbound traffic;
    inbound published ports do not go through it.
 
+## Web UI / desktop app operates from `/` instead of `/workspace`
+
+**Symptom.** In the **web UI or desktop app**, the agent reports its working
+directory as `/` (root). Writes to your repo fail or land in the wrong place,
+and the agent may only reach your code when you name the full `/workspace/...`
+path. The **TUI does not have this problem** — it starts in `/workspace`.
+
+**Cause.** An upstream OpenCode bug, not a fault in this setup. The image is
+correct (`WORKDIR /workspace`, `CMD ["serve"]`) and the entrypoint hands off to
+`opencode serve` from `/workspace`, but on the shipped OpenCode version
+(**1.16.2** — the latest release as of 2026-06) the **web/desktop client
+ignores the server's working directory and defaults the project root to `/`**.
+There is no flag, config, or env var to override it on this version: 1.16.2's
+`serve` has no directory option at all (confirm with
+`docker exec opencode-<slug> opencode serve --help`). The TUI escapes the bug
+only because `./scripts/opencode` (and the launcher's `--tui`) attach with
+`docker exec … -w /workspace … opencode`, which pins the project root.
+Tracking: [opencode#14445](https://github.com/anomalyco/opencode/issues/14445),
+[opencode#14460](https://github.com/anomalyco/opencode/issues/14460).
+
+**What to do.**
+
+- **Prefer the TUI** — `./scripts/opencode` or the launcher's `--tui`. This is
+  the recommended frontend until OpenCode ships a fix.
+- **If you use the web UI / desktop**, make your **first prompt** instruct the
+  agent to `cd /workspace` and work from there for the rest of the session.
+
+**Is it dangerous?** Rooted at `/`, the agent can read across the whole
+container filesystem. The container is the security boundary — no internet
+egress (Squid allowlist), remote git gated by `git-guard` — so the practical
+blast radius is the container itself, which is disposable: if a session messes
+it up, restart fresh (`docker compose down && docker compose up -d`). It is
+still a reason to prefer the TUI and to keep the agent scoped to `/workspace`.
+
+**How to tell when it's fixed.** After bumping the image to a newer OpenCode,
+the fix is available once `serve` exposes a directory flag:
+
+```
+docker exec opencode-<slug> opencode serve --help | grep -- --cwd
+```
+
+When that returns a match, pass `--cwd /workspace` to `opencode serve` in
+`opencode/entrypoint.sh` and the web UI will root at `/workspace` like the TUI.
+
 ## Git push refused: "set ALLOW_REMOTE_GIT=1"
 
 That's the safety gate doing its job. See
