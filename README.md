@@ -93,9 +93,14 @@ Three scopes (image, you-only, this-repo). See
 
 A curated set of OpenCode plugins (superpowers, dynamic context pruning,
 workspace planning/background-agents) is baked into the image but **off by
-default**. Turn one on by listing it under `plugins.enabled` in
-`~/.config/opencode/disabled.yaml`, then restart — no network required. Run
-`/plugins` for the live catalog. Full details (and how to add your own) in
+default**. Turn them on the same way as every other switch — a line in `.env`:
+
+```
+ENABLED_PLUGINS=superpowers dcp
+```
+
+then restart. No network required. Run `/plugins` in the TUI for the live
+catalog. Full details (and how to add your own) in
 [`docs/ADDING_PLUGINS.md`](docs/ADDING_PLUGINS.md).
 
 ## Per-developer allowlist additions

@@ -20,9 +20,8 @@ Do this, then stop:
    - `opencode-workspace` — `plan_save`/`plan_read` planning tools plus
      background-agent delegation (async sub-agents).
    (If a baked plugin isn't in this map, show its name with "(no description).")
-4. Finish with one line on how to toggle: edit
-   `~/.config/opencode/disabled.yaml` — uncomment a name under `plugins.enabled`
-   to turn it ON, remove it to turn OFF — then restart the container. Enabling
-   needs no network; the plugins are already baked into the image.
+4. Finish with one line on how to toggle: set `ENABLED_PLUGINS` in `.env` on the
+   host (space- or comma-separated, e.g. `ENABLED_PLUGINS=superpowers dcp`) and
+   restart. Enabling needs no network; the plugins are already baked in.
 
 Keep it to the table plus the one-line how-to. Do not modify any files.

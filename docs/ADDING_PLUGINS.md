@@ -39,48 +39,42 @@ array entries, which we don't use):
 
 ## Turning a plugin on or off (developer)
 
-Plugins are controlled from the **live** switch file *inside the container*:
-`~/.config/opencode/disabled.yaml` (i.e. `/home/dev/.config/opencode/disabled.yaml`).
-It lives in the user-config volume and is seeded on first boot from the image's
-`disabled.yaml.default` template.
+**The easy way — `ENABLED_PLUGINS` in `.env`.** Plugins are toggled like every
+other switch in this system (`ALLOW_REMOTE_GIT`, `ENABLE_SESSION_LOGS`): one line
+in your host `.env`, then restart. No container, no YAML, no shell-in.
 
-> **Don't edit the repo's `opencode/disabled.yaml.default`** to toggle anything —
-> that's only the build-time seed. It's copied to the live file once, on a fresh
-> config volume, and editing it does nothing to a running stack.
-
-Find the `plugins:` block in the live file:
-
-```yaml
-plugins:
-  enabled:
-    # - superpowers
-    # - dcp
-    # - opencode-workspace
+```dotenv
+# .env (on your host)
+ENABLED_PLUGINS=superpowers dcp
 ```
 
-- **Enable**: uncomment a name (remove the leading `# `).
-- **Disable**: delete its line (or comment it back out).
-
-Two ways to edit the live file, then **restart** (`docker compose restart
-opencode`, or re-run the launcher):
-
-```bash
-# In-container (vim ships in the image; the dev user owns the file):
-docker exec -u dev -it opencode-<slug> vim /home/dev/.config/opencode/disabled.yaml
-
-# Or, for host-side editing, set this in .env and restart once:
-#   USER_LAYER_PATH=./user-layer
-# then edit ./user-layer/disabled.yaml in your normal editor.
-```
-
-Verify it took effect — the entrypoint symlinks enabled plugins on boot:
+Then re-run the launcher (or `scripts/opencode`). Names are space- or
+comma-separated; available names are `superpowers`, `dcp`, `opencode-workspace`.
+The entrypoint reads `$ENABLED_PLUGINS` on boot and symlinks those plugins into
+`~/.config/opencode/plugin/`. To disable one, remove it from the line and
+restart. Verify:
 
 ```bash
 docker exec opencode-<slug> ls -l /home/dev/.config/opencode/plugin/
 ```
 
-The change is per-developer and follows you across repos (it's in your
-user-config volume).
+> A restart is always required — OpenCode loads plugins once at startup and has
+> no hot-reload. Re-running the launcher *is* the restart, so this is no extra
+> step.
+
+**The advanced way — the live `disabled.yaml`.** There's also a per-developer
+list in the **live** switch file inside the container,
+`~/.config/opencode/disabled.yaml` (seeded on first boot from the image's
+`disabled.yaml.default` template). Names under its `plugins.enabled` block are
+**unioned** with `ENABLED_PLUGINS`. This is mainly useful when you bind-mount the
+config dir with `USER_LAYER_PATH=./user-layer` and edit
+`./user-layer/disabled.yaml` from your host editor.
+
+> **Don't edit the repo's `opencode/disabled.yaml.default`** to toggle anything —
+> that's only the build-time seed, copied to the live file once on a fresh config
+> volume. Editing it does nothing to a running stack. For one-off in-container
+> edits while a `--persist` stack is up:
+> `docker exec -u dev -it opencode-<slug> vim /home/dev/.config/opencode/disabled.yaml`.
 
 > The same file's `disabled:` block turns *off* bundled agents/skills/commands
 > (those ship ON). Plugins are the opposite — opt-in — which is why they use an

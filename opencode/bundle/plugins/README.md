@@ -10,10 +10,11 @@ thing in `plugins/` that ships from the repo.
 ## Why plugins are different
 
 - **Opt-in / default-OFF.** Agents/skills/commands ship enabled; plugins ship
-  disabled. A developer turns one on by listing its `<name>` under
-  `plugins: { enabled: [...] }` in `~/.config/opencode/disabled.yaml` (seeded
-  from [`../disabled.yaml.default`](../disabled.yaml.default)). `/plugins` shows
-  the live state.
+  disabled. A developer turns one on via `ENABLED_PLUGINS` in `.env` (the easy
+  path), or by listing its `<name>` under `plugins: { enabled: [...] }` in the
+  live `~/.config/opencode/disabled.yaml` (seeded from
+  [`../disabled.yaml.default`](../disabled.yaml.default)); the two are unioned.
+  `/plugins` shows the live state.
 - **Loaded by symlink, not by the `plugin` array.** OpenCode auto-scans
   `plugin/*.{ts,js}` in each config dir and imports the files directly (it
   follows symlinks; verified in the 1.16.2 and 1.17.3 binaries). The entrypoint

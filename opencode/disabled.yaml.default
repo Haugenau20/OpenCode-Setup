@@ -29,8 +29,13 @@ disabled:
   mcp:     []
 
 # --- Plugins: OFF by default (opt-in) -----------------------------------------
-# Uncomment a name under `enabled` to turn that plugin ON. These are baked into
-# the image with their dependencies vendored — enabling one needs no network.
+# EASIEST WAY TO TOGGLE: set ENABLED_PLUGINS in your .env on the host (e.g.
+#   ENABLED_PLUGINS=superpowers dcp) and restart — no need to touch this file.
+#
+# This `enabled` list is the advanced/per-developer alternative (handy when you
+# bind-mount this config via USER_LAYER_PATH). Names here are UNIONED with
+# ENABLED_PLUGINS. Plugins are baked in with deps vendored — enabling needs no
+# network. Uncomment a name to turn it ON.
 plugins:
   enabled:
     # - superpowers         # skills library: brainstorming, writing-plans,

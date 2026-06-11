@@ -147,9 +147,10 @@ bundle kinds in two ways:
    `plugins-build` stage of the Dockerfile, then copied into the image. The repo
    stores only the build recipe, not the vendored code.
 2. **Opt-in (default OFF).** Agents/skills/commands ship enabled and are turned
-   *off* via the `disabled:` lists. Plugins ship disabled and are turned *on* by
-   listing `<name>` under `plugins: { enabled: [...] }` in `disabled.yaml`. The
-   `/plugins` command shows live state.
+   *off* via the `disabled:` lists. Plugins ship disabled and are turned *on*
+   either by the `ENABLED_PLUGINS` env var (set in `.env` — the easy path) or by
+   listing `<name>` under `plugins: { enabled: [...] }` in `disabled.yaml`; the
+   entrypoint unions the two. The `/plugins` command shows live state.
 
 **Load mechanism.** OpenCode auto-scans `plugin/*.{ts,js}` in each config dir and
 imports the matching files directly, following symlinks

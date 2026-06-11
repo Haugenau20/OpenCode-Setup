@@ -90,10 +90,11 @@ done
 # imports the files directly (no Bun install, follows symlinks). We exploit that:
 # each baked plugin lives at ${BUNDLE}/plugins/<name>/ with an `entries` manifest
 # (`<symlink-name>=<relative/entry/path>` per line); we symlink the entry files
-# of ENABLED plugins into ${USER_CFG}/plugin/. Plugins are opt-in, so a plugin is
-# linked only if its <name> appears under `plugins: { enabled: [...] }` in
-# disabled.yaml. The `plugin` array in opencode.json is deliberately NOT used —
-# that path triggers a network Bun install, which the locked-down egress blocks.
+# of ENABLED plugins into ${USER_CFG}/plugin/. Plugins are opt-in: a plugin is
+# linked only if its <name> appears in the ENABLED_PLUGINS env var (set in .env —
+# the easy host-side toggle) OR under `plugins: { enabled: [...] }` in
+# disabled.yaml; the two are unioned. The `plugin` array in opencode.json is
+# deliberately NOT used — it triggers a network Bun install the egress blocks.
 
 # Names listed under the nested `plugins: -> enabled:` block of disabled.yaml.
 enabled_plugins() {
@@ -115,7 +116,15 @@ if [ -d "${PLUGIN_SRC}" ]; then
     # Drop stale plugin symlinks from a previous boot/bundle (config is a volume).
     find "${PLUGIN_DST}" -maxdepth 1 -xtype l -delete 2>/dev/null || true
 
-    enabled="$(enabled_plugins | tr '\n' ' ')"
+    # ENABLED_PLUGINS (set in .env on the host) is the low-friction toggle:
+    # space- or comma-separated plugin names. We union it with the file-based
+    # `plugins.enabled` list so both the easy path and per-developer
+    # disabled.yaml edits work. Tolerate commas and stray quotes from .env.
+    env_enabled="${ENABLED_PLUGINS:-}"
+    env_enabled="${env_enabled//,/ }"
+    env_enabled="${env_enabled//\"/}"
+    env_enabled="${env_enabled//\'/}"
+    enabled="$(enabled_plugins | tr '\n' ' ') ${env_enabled}"
     for dir in "${PLUGIN_SRC}"/*/; do
         [ -d "${dir}" ] || continue
         name="$(basename "${dir}")"
