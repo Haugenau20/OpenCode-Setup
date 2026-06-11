@@ -13,6 +13,7 @@ ca/*.cer
 user-layer/
 extra-allowlist.d/*.conf
 !extra-allowlist.d/.gitkeep
+!extra-allowlist.d/placeholder.conf
 
 # Editor / OS noise
 .vscode/
