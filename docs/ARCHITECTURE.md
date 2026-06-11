@@ -96,7 +96,9 @@ like the browser does.
 ```
 /opt/opencode/bundle/                # workplace-shipped agents/skills/etc.
   agents/  skills/  commands/  mcp/  # read-only inside the image
+  plugins/<name>/                    # opt-in plugins, built+vendored at build time
 /etc/opencode/policy.yaml            # read-only workplace policy
+/etc/opencode/disabled.yaml.default  # seed for the user's toggle file
 /usr/local/share/ca-certificates/    # corp CA baked in here
 /usr/local/bin/git                   # symlink to git-guard (PATH-first)
 /usr/local/bin/git-guard             # wraps real git, blocks remote ops
@@ -130,6 +132,39 @@ disabled:
   commands: []
   mcp:     []
 ```
+
+`disabled.yaml` is seeded on first boot from
+`/etc/opencode/disabled.yaml.default` (the entrypoint copies it only if absent),
+so the developer always has a self-documenting menu to edit.
+
+## Plugins
+
+Plugins (`bundle/plugins/<name>/`) are handled differently from the other
+bundle kinds in two ways:
+
+1. **Built, not checked in.** The plugin code — frequently with a
+   `node_modules/` — is cloned at a pinned ref and vendored by the
+   `plugins-build` stage of the Dockerfile, then copied into the image. The repo
+   stores only the build recipe, not the vendored code.
+2. **Opt-in (default OFF).** Agents/skills/commands ship enabled and are turned
+   *off* via the `disabled:` lists. Plugins ship disabled and are turned *on*
+   either by the `ENABLED_PLUGINS` env var (set in `.env` — the easy path) or by
+   listing `<name>` under `plugins: { enabled: [...] }` in `disabled.yaml`; the
+   entrypoint unions the two. The `/plugins` command shows live state.
+
+**Load mechanism.** OpenCode auto-scans `plugin/*.{ts,js}` in each config dir and
+imports the matching files directly, following symlinks
+(`Bun.Glob("{plugin,plugins}/*.{ts,js}", {symlink:true})` — verified in the
+1.16.2 and 1.17.3 binaries). The entrypoint symlinks the entry files of
+*enabled* plugins (read from
+each plugin's `entries` manifest) into `~/.config/opencode/plugin/`. Node/Bun
+resolves imports from the entry's real path, so a plugin's vendored
+`node_modules/` is found without any install.
+
+We deliberately avoid the `plugin` array in `opencode.json`: that path triggers
+a Bun network install at startup, which the egress lock blocks. `policy.yaml`
+additionally sets `BUN_CONFIG_SKIP_INSTALL_PACKAGES=true` so no startup install
+is ever attempted. Full flow in [`ADDING_PLUGINS.md`](ADDING_PLUGINS.md).
 
 ## Git safety
 

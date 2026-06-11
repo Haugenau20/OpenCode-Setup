@@ -6,6 +6,13 @@ env:
   OPENCODE_DISABLE_TELEMETRY: "1"
   OPENCODE_AUTOUPDATE: "0"
 
+  # Plugins are baked with their deps vendored; never let OpenCode/Bun try to
+  # install plugin dependencies at startup (the egress lock would block it and
+  # stall/​noise the boot). Resolution falls back to the vendored node_modules.
+  # NOTE: intentionally unquoted — entrypoint sources this with `IFS=: read`,
+  # which keeps surrounding quotes literally in the value; Bun wants a bare true.
+  BUN_CONFIG_SKIP_INSTALL_PACKAGES: true
+
   # Common phone-home flags for tooling we ship.
   DO_NOT_TRACK: "1"
   NEXT_TELEMETRY_DISABLED: "1"
