@@ -113,8 +113,20 @@ enabled_plugins() {
 PLUGIN_SRC="${BUNDLE}/plugins"
 PLUGIN_DST="${USER_CFG}/plugin"
 if [ -d "${PLUGIN_SRC}" ]; then
-    # Drop stale plugin symlinks from a previous boot/bundle (config is a volume).
-    find "${PLUGIN_DST}" -maxdepth 1 -xtype l -delete 2>/dev/null || true
+    # Clear every plugin symlink WE manage (any link whose target is under the
+    # bundle), not just broken ones. The config dir is a persistent volume, so a
+    # link created when a plugin was enabled would otherwise linger forever and
+    # the plugin would stay on even after it's removed from ENABLED_PLUGINS. We
+    # rebuild the enabled set from scratch below. User-provided real files or
+    # their own symlinks (e.g. via USER_LAYER_PATH) are left untouched.
+    if [ -d "${PLUGIN_DST}" ]; then
+        for link in "${PLUGIN_DST}"/*; do
+            [ -L "${link}" ] || continue
+            case "$(readlink "${link}")" in
+                "${PLUGIN_SRC}"/*) rm -f "${link}" ;;
+            esac
+        done
+    fi
 
     # ENABLED_PLUGINS (set in .env on the host) is the low-friction toggle:
     # space- or comma-separated plugin names. We union it with the file-based
@@ -129,7 +141,7 @@ if [ -d "${PLUGIN_SRC}" ]; then
         [ -d "${dir}" ] || continue
         name="$(basename "${dir}")"
         if ! printf ' %s ' "${enabled}" | grep -q " ${name} "; then
-            log "plugin off: ${name} (enable in disabled.yaml; see /plugins)"
+            log "plugin off: ${name} (enable via ENABLED_PLUGINS; see /plugins)"
             continue
         fi
         [ -f "${dir}entries" ] || { log "plugin ${name}: no entries manifest, skipping"; continue; }
