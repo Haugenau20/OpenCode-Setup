@@ -26,7 +26,16 @@ USER_CFG=/home/dev/.config/opencode
 BUNDLE=/opt/opencode/bundle
 DISABLED_FILE="${USER_CFG}/disabled.yaml"
 
-mkdir -p "${USER_CFG}"/{agents,skills,commands,mcp}
+mkdir -p "${USER_CFG}"/{agents,skills,commands,mcp,plugin}
+
+# Seed the developer's on/off switch file on first boot. It is the single
+# control surface for toggling bundled content (and the menu the `/plugins`
+# command points at). We never overwrite an existing one — it lives in the
+# user-config volume and is the developer's to edit.
+if [ ! -f "${DISABLED_FILE}" ] && [ -f /etc/opencode/disabled.yaml.default ]; then
+    cp /etc/opencode/disabled.yaml.default "${DISABLED_FILE}"
+    log "seeded ${DISABLED_FILE} (edit it to toggle bundled content; see /plugins)"
+fi
 
 # Read disabled.yaml into bash arrays (simple grep — no yaml parser needed
 # for a flat list-of-lists schema). Falls back to empty arrays.
@@ -75,6 +84,58 @@ symlink_bundle() {
 for kind in agents skills commands mcp; do
     symlink_bundle "${kind}"
 done
+
+# ---- 3b. Plugins: opt-in (default OFF), symlinked into plugin/ ----------------
+# OpenCode 1.16.2 auto-scans `{plugin,plugins}/*.{ts,js}` in each config dir and
+# imports the files directly (no Bun install, follows symlinks). We exploit that:
+# each baked plugin lives at ${BUNDLE}/plugins/<name>/ with an `entries` manifest
+# (`<symlink-name>=<relative/entry/path>` per line); we symlink the entry files
+# of ENABLED plugins into ${USER_CFG}/plugin/. Plugins are opt-in, so a plugin is
+# linked only if its <name> appears under `plugins: { enabled: [...] }` in
+# disabled.yaml. The `plugin` array in opencode.json is deliberately NOT used —
+# that path triggers a network Bun install, which the locked-down egress blocks.
+
+# Names listed under the nested `plugins: -> enabled:` block of disabled.yaml.
+enabled_plugins() {
+    [ -f "${DISABLED_FILE}" ] || return 0
+    awk '
+        /^plugins:/ {p=1; next}
+        p && /^[a-zA-Z]/ {p=0}                       # left the plugins: block
+        p && /^[[:space:]]+enabled:/ {e=1; next}
+        p && e && /^[[:space:]]+-/ {
+            sub(/^[[:space:]]*-[[:space:]]*/, ""); sub(/[[:space:]]*#.*/, ""); print
+        }
+        p && e && /^[[:space:]]+[a-zA-Z]/ {e=0}       # left the enabled: sub-block
+    ' "${DISABLED_FILE}"
+}
+
+PLUGIN_SRC="${BUNDLE}/plugins"
+PLUGIN_DST="${USER_CFG}/plugin"
+if [ -d "${PLUGIN_SRC}" ]; then
+    # Drop stale plugin symlinks from a previous boot/bundle (config is a volume).
+    find "${PLUGIN_DST}" -maxdepth 1 -xtype l -delete 2>/dev/null || true
+
+    enabled="$(enabled_plugins | tr '\n' ' ')"
+    for dir in "${PLUGIN_SRC}"/*/; do
+        [ -d "${dir}" ] || continue
+        name="$(basename "${dir}")"
+        if ! printf ' %s ' "${enabled}" | grep -q " ${name} "; then
+            log "plugin off: ${name} (enable in disabled.yaml; see /plugins)"
+            continue
+        fi
+        [ -f "${dir}entries" ] || { log "plugin ${name}: no entries manifest, skipping"; continue; }
+        while IFS='=' read -r linkname relpath; do
+            [ -n "${linkname}" ] && [ -n "${relpath}" ] || continue
+            case "${linkname}" in \#*) continue ;; esac
+            ln -sfn "${dir}${relpath}" "${PLUGIN_DST}/${linkname}"
+        done < "${dir}entries"
+        # Per-plugin runtime config seeded into the user config dir, if shipped.
+        if [ -f "${dir}seed/dcp.jsonc" ] && [ ! -f "${USER_CFG}/dcp.jsonc" ]; then
+            cp "${dir}seed/dcp.jsonc" "${USER_CFG}/dcp.jsonc"
+        fi
+        log "plugin on:  ${name}"
+    done
+fi
 
 # ---- 4. Provision LLM credentials + config -----------------------------------
 # opencode's {env:...} substitution is unreliable for apiKey in custom providers

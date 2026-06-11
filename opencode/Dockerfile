@@ -34,6 +34,71 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
 COPY ca/ /usr/local/share/ca-certificates/corp/
 RUN update-ca-certificates
 
+# ---- Plugins build: vendor the opt-in plugins, offline-ready -----------------
+# Each plugin is cloned at a PINNED ref, built, and its runtime deps vendored,
+# then laid out under /staging/plugins/<name>/ with an `entries` manifest the
+# entrypoint reads (`<symlink-name>=<relative/entry/path>` per line). At runtime
+# OpenCode 1.16.2 auto-scans `plugin/*.{ts,js}` and imports the symlinked entry
+# files directly — no Bun install, no network. Bump a *_REF to update a plugin.
+# `base` already carries node 20, git, build-essential, and python3.
+FROM base AS plugins-build
+
+# Pin every plugin. superpowers/workspace publish no usable tags, so they pin by
+# commit SHA; DCP pins by release tag. Update deliberately and re-test on bumps.
+ARG SUPERPOWERS_REF=6fd4507
+ARG DCP_REF=v3.1.12
+ARG WORKSPACE_REF=4451c688ebfc2cab2eb7bdb4a6a87ad017ea24db
+
+WORKDIR /build
+RUN mkdir -p /staging/plugins
+
+# superpowers — zero npm deps; pure-JS plugin entry + bundled skills library.
+RUN git clone https://github.com/obra/superpowers.git superpowers \
+    && git -C superpowers checkout "${SUPERPOWERS_REF}" \
+    && mkdir -p /staging/plugins/superpowers \
+    && cp -r superpowers/.opencode superpowers/skills superpowers/package.json \
+            /staging/plugins/superpowers/ \
+    && printf 'superpowers.js=.opencode/plugins/superpowers.js\n' \
+            > /staging/plugins/superpowers/entries \
+    && git -C superpowers rev-parse HEAD > /staging/plugins/superpowers/.baked-commit
+
+# dcp — TypeScript plugin built with tsup; runtime deps vendored (WASM tokenizer,
+# no native addons). Seeds dcp.jsonc with autoUpdate off so it never pokes npm.
+RUN git clone --depth 1 --branch "${DCP_REF}" \
+        https://github.com/Opencode-DCP/opencode-dynamic-context-pruning.git dcp \
+    && cd dcp && npm install --no-audit --no-fund && npm run build \
+       && npm prune --omit=dev && cd .. \
+    && mkdir -p /staging/plugins/dcp/seed \
+    && cp -r dcp/dist dcp/node_modules dcp/package.json /staging/plugins/dcp/ \
+    && printf 'dcp.js=dist/index.js\n' > /staging/plugins/dcp/entries \
+    && printf '{\n  "autoUpdate": false,\n  "debug": false\n}\n' \
+            > /staging/plugins/dcp/seed/dcp.jsonc \
+    && git -C dcp rev-parse HEAD > /staging/plugins/dcp/.baked-commit
+
+# opencode-workspace — keep ONLY the two container-safe plugins. Excludes
+# worktree.ts (spawns terminals/sibling containers — impossible in this sandbox)
+# and notify.ts (desktop/macOS notifications — useless headless). Deps are plain
+# npm packages, vendored alongside the .ts files (which OpenCode/Bun imports).
+RUN git clone https://github.com/kdcokenny/opencode-workspace.git workspace \
+    && git -C workspace checkout "${WORKSPACE_REF}" \
+    && mkdir -p /staging/plugins/opencode-workspace \
+    && cp workspace/src/plugin/workspace-plugin.ts \
+          workspace/src/plugin/background-agents.ts \
+          /staging/plugins/opencode-workspace/ \
+    && cp -r workspace/src/plugin/kdco-primitives \
+            /staging/plugins/opencode-workspace/ \
+    && printf '%s\n%s\n' \
+          'workspace-plan.ts=workspace-plugin.ts' \
+          'workspace-background.ts=background-agents.ts' \
+          > /staging/plugins/opencode-workspace/entries \
+    && git -C workspace rev-parse HEAD \
+          > /staging/plugins/opencode-workspace/.baked-commit \
+    && cd /staging/plugins/opencode-workspace \
+    && npm init -y >/dev/null \
+    && npm install --no-audit --no-fund \
+          @opencode-ai/plugin@1.16.2 @opencode-ai/sdk@1.16.2 \
+          zod@3.23.8 unique-names-generator@4.7.1 jsonc-parser@3.3.1
+
 # ---- Runtime: opencode + workplace bundle ------------------------------------
 FROM base AS runtime
 
@@ -46,6 +111,12 @@ RUN npm install -g opencode-ai@${OPENCODE_VERSION} \
 COPY opencode/bundle/ /opt/opencode/bundle/
 COPY opencode/policy.yaml /etc/opencode/policy.yaml
 COPY opencode/opencode.json /etc/opencode/opencode.json
+
+# Opt-in plugins, built and vendored in the plugins-build stage. The entrypoint
+# symlinks the entry files of ENABLED plugins (per disabled.yaml) into the user
+# config at start. disabled.yaml.default is the seed for the user's toggle file.
+COPY --from=plugins-build /staging/plugins/ /opt/opencode/bundle/plugins/
+COPY opencode/disabled.yaml.default /etc/opencode/disabled.yaml.default
 
 # git-guard: block remote git ops unless ALLOW_REMOTE_GIT=1.
 COPY opencode/git-guard /usr/local/bin/git-guard

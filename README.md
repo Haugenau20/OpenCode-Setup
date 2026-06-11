@@ -59,6 +59,8 @@ If something doesn't work, run `./scripts/doctor.sh` first.
 - All outbound traffic forced through Squid; allowlist is the LLM endpoint,
   Bitbucket, and JIRA.
 - Bundled workplace agents/skills/commands you can extend or disable.
+- A curated set of OpenCode plugins baked in but **off by default** — opt in per
+  developer, no network needed. Run `/plugins` to see them.
 - A git safety gate: remote operations (`push`, `fetch`, `pull`, `clone`)
   are blocked unless `ALLOW_REMOTE_GIT=1` in `.env`.
 - Per-project persistent session/conversation logs (toggle off if you don't
@@ -86,6 +88,15 @@ Off by default. See [`docs/ALLOWING_GIT_PUSH.md`](docs/ALLOWING_GIT_PUSH.md).
 
 Three scopes (image, you-only, this-repo). See
 [`docs/ADDING_SKILLS.md`](docs/ADDING_SKILLS.md).
+
+## Plugins
+
+A curated set of OpenCode plugins (superpowers, dynamic context pruning,
+workspace planning/background-agents) is baked into the image but **off by
+default**. Turn one on by listing it under `plugins.enabled` in
+`~/.config/opencode/disabled.yaml`, then restart — no network required. Run
+`/plugins` for the live catalog. Full details (and how to add your own) in
+[`docs/ADDING_PLUGINS.md`](docs/ADDING_PLUGINS.md).
 
 ## Per-developer allowlist additions
 

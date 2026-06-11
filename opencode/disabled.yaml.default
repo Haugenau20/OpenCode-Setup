@@ -1,0 +1,30 @@
+# ~/.config/opencode/disabled.yaml — your personal on/off switches.
+#
+# This file is seeded once on first boot and is yours to edit. It is the single
+# control surface for the workplace bundle. Run `/plugins` in the TUI for the
+# live catalog of plugins and their current state. Restart the container after
+# editing for changes to take effect.
+#
+# Two different defaults, by design:
+#   • agents / skills / commands / mcp ship ENABLED — list a name to turn it OFF.
+#   • plugins ship DISABLED (opt-in) — list a name under `enabled` to turn it ON.
+
+# --- Bundled agents/skills/commands/mcp: ON by default ------------------------
+# Add a name to a list below to turn that item OFF.
+disabled:
+  agents:  []
+  skills:  []
+  commands: []
+  mcp:     []
+
+# --- Plugins: OFF by default (opt-in) -----------------------------------------
+# Uncomment a name under `enabled` to turn that plugin ON. These are baked into
+# the image with their dependencies vendored — enabling one needs no network.
+plugins:
+  enabled:
+    # - superpowers         # skills library: brainstorming, writing-plans,
+    #                       #   systematic-debugging, TDD, code-review, etc.
+    # - dcp                 # dynamic context pruning — trims stale tool output
+    #                       #   from the context window to save tokens.
+    # - opencode-workspace  # plan_save/plan_read tools + background-agent
+    #                       #   delegation (async sub-agents).

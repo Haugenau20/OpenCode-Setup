@@ -53,7 +53,7 @@ up.
 Two options.
 
 1. Create a file with the same name in your user layer — your version wins.
-2. Add it to `~/.opencode-work/disabled.yaml`:
+2. Add it to `~/.config/opencode/disabled.yaml` (seeded on first boot):
 
    ```yaml
    disabled:
@@ -65,6 +65,10 @@ Two options.
 
 The entrypoint reads this file and skips the matching bundle items when it
 builds the merged config.
+
+> Plugins work the *opposite* way — they ship OFF and are opted in via the
+> `plugins.enabled` list in the same file. See
+> [`ADDING_PLUGINS.md`](ADDING_PLUGINS.md).
 
 ## One repo only
 
