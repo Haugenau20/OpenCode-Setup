@@ -15,11 +15,40 @@ dependencies are already vendored in the image.
 
 Run **`/plugins`** in the TUI for the live catalog and current on/off state.
 
+### How to tell a plugin is working
+
+Each plugin surfaces differently — there is no single "plugins" list in the TUI
+that shows them (the Ctrl-P plugins dialog only lists `opencode.json` `plugin`
+array entries, which we don't use):
+
+- **superpowers** registers skills and injects a bootstrap — ask *"tell me about
+  your superpowers"* or check the skills list.
+- **opencode-workspace** adds model-callable tools — `plan_save`, `plan_read`,
+  and `delegate*`. Ask the agent what tools it has.
+- **dcp** is **invisible by design**. It does **not** add a tool the model can
+  call — it works purely through a `chat.messages.transform` hook that *silently
+  prunes obsolete tool outputs from the context*, and only once a conversation
+  passes a token **threshold**. In a short chat it correctly does nothing, and
+  the model will say it has no "compress/prune" tool — that is expected, not a
+  failure. To see it act, set `"debug": true` in `~/.config/opencode/dcp.jsonc`,
+  restart, run a long tool-heavy session, and watch the log.
+
+  > **Caveat:** dcp relies on `experimental.chat.messages.transform`, which is
+  > deprecated upstream. It works today but is the plugin most likely to break
+  > on an OpenCode bump — re-test it whenever you change `OPENCODE_VERSION`.
+
 ## Turning a plugin on or off (developer)
 
-Plugins are controlled from a single file in your user config:
-`~/.config/opencode/disabled.yaml` (seeded on first boot — it's yours to edit).
-Find the `plugins:` block:
+Plugins are controlled from the **live** switch file *inside the container*:
+`~/.config/opencode/disabled.yaml` (i.e. `/home/dev/.config/opencode/disabled.yaml`).
+It lives in the user-config volume and is seeded on first boot from the image's
+`disabled.yaml.default` template.
+
+> **Don't edit the repo's `opencode/disabled.yaml.default`** to toggle anything —
+> that's only the build-time seed. It's copied to the live file once, on a fresh
+> config volume, and editing it does nothing to a running stack.
+
+Find the `plugins:` block in the live file:
 
 ```yaml
 plugins:
@@ -32,9 +61,26 @@ plugins:
 - **Enable**: uncomment a name (remove the leading `# `).
 - **Disable**: delete its line (or comment it back out).
 
-Then **restart the container** (`docker compose restart opencode`, or just
-re-run the launcher). The change is per-developer and follows you across repos,
-because it lives in the user-config volume.
+Two ways to edit the live file, then **restart** (`docker compose restart
+opencode`, or re-run the launcher):
+
+```bash
+# In-container (vim ships in the image; the dev user owns the file):
+docker exec -u dev -it opencode-<slug> vim /home/dev/.config/opencode/disabled.yaml
+
+# Or, for host-side editing, set this in .env and restart once:
+#   USER_LAYER_PATH=./user-layer
+# then edit ./user-layer/disabled.yaml in your normal editor.
+```
+
+Verify it took effect — the entrypoint symlinks enabled plugins on boot:
+
+```bash
+docker exec opencode-<slug> ls -l /home/dev/.config/opencode/plugin/
+```
+
+The change is per-developer and follows you across repos (it's in your
+user-config volume).
 
 > The same file's `disabled:` block turns *off* bundled agents/skills/commands
 > (those ship ON). Plugins are the opposite — opt-in — which is why they use an
@@ -46,8 +92,8 @@ The usual OpenCode instruction — `"plugin": ["foo@git+https://github.com/..."]
 in `opencode.json` — makes OpenCode run a **Bun install at startup**, reaching
 out to GitHub/npm. This image's egress is locked to the LLM endpoint, Bitbucket,
 and JIRA, so that install would fail. Instead, plugins are vendored at build time
-and loaded from local files (OpenCode 1.16.2 auto-imports `plugin/*.{ts,js}`
-from your config dir). To add a plugin that isn't baked in, it has to go into the
+and loaded from local files (OpenCode auto-imports `plugin/*.{ts,js}` from your
+config dir). To add a plugin that isn't baked in, it has to go into the
 image — see below.
 
 ## Adding a plugin to the image (maintainer)

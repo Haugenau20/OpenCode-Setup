@@ -14,9 +14,10 @@ thing in `plugins/` that ships from the repo.
   `plugins: { enabled: [...] }` in `~/.config/opencode/disabled.yaml` (seeded
   from [`../disabled.yaml.default`](../disabled.yaml.default)). `/plugins` shows
   the live state.
-- **Loaded by symlink, not by the `plugin` array.** OpenCode 1.16.2 auto-scans
+- **Loaded by symlink, not by the `plugin` array.** OpenCode auto-scans
   `plugin/*.{ts,js}` in each config dir and imports the files directly (it
-  follows symlinks). The entrypoint symlinks the entry files of *enabled*
+  follows symlinks; verified in the 1.16.2 and 1.17.3 binaries). The entrypoint
+  symlinks the entry files of *enabled*
   plugins into `~/.config/opencode/plugin/`. We deliberately do **not** put
   entries in `opencode.json`'s `plugin` array — that path makes OpenCode/Bun
   run a network install, which the egress lock blocks. `policy.yaml` also sets

@@ -151,10 +151,11 @@ bundle kinds in two ways:
    listing `<name>` under `plugins: { enabled: [...] }` in `disabled.yaml`. The
    `/plugins` command shows live state.
 
-**Load mechanism.** OpenCode 1.16.2 auto-scans `plugin/*.{ts,js}` in each config
-dir and imports the matching files directly, following symlinks
-(`Bun.Glob("{plugin,plugins}/*.{ts,js}", {symlink:true})` in the shipped
-binary). The entrypoint symlinks the entry files of *enabled* plugins (read from
+**Load mechanism.** OpenCode auto-scans `plugin/*.{ts,js}` in each config dir and
+imports the matching files directly, following symlinks
+(`Bun.Glob("{plugin,plugins}/*.{ts,js}", {symlink:true})` — verified in the
+1.16.2 and 1.17.3 binaries). The entrypoint symlinks the entry files of
+*enabled* plugins (read from
 each plugin's `entries` manifest) into `~/.config/opencode/plugin/`. Node/Bun
 resolves imports from the entry's real path, so a plugin's vendored
 `node_modules/` is found without any install.
