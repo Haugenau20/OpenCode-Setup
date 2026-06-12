@@ -8,11 +8,12 @@ Do this, then stop:
 
 1. List the baked plugins — the directory names under
    `/opt/opencode/bundle/plugins/` (ignore non-directories like `README.md`).
-2. Read the enabled list from `~/.config/opencode/disabled.yaml`: the names
-   under the `plugins:` → `enabled:` block. Ignore lines starting with `#`.
+2. Determine each plugin's ACTUAL loaded state by inspecting
+   `~/.config/opencode/plugin/`: a plugin is `ON` if that directory contains a
+   symlink whose target is under `/opt/opencode/bundle/plugins/<name>/`, else
+   `OFF`. (This reflects what the entrypoint linked from `ENABLED_PLUGINS`.)
 3. Print a compact table — one row per baked plugin — with: the plugin name,
-   `ON` if it is in the enabled list (else `OFF`), and a one-line description
-   from this map:
+   `ON`/`OFF`, and a one-line description from this map:
    - `superpowers` — skills library: brainstorming, writing-plans,
      systematic-debugging, TDD, requesting/receiving code review, and more.
    - `dcp` — dynamic context pruning: trims stale tool output from the context
