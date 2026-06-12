@@ -9,12 +9,12 @@ thing in `plugins/` that ships from the repo.
 
 ## Why plugins are different
 
-- **Opt-in / default-OFF.** Agents/skills/commands ship enabled; plugins ship
-  disabled. A developer turns one on via `ENABLED_PLUGINS` in `.env` (the easy
-  path), or by listing its `<name>` under `plugins: { enabled: [...] }` in the
-  live `~/.config/opencode/disabled.yaml` (seeded from
-  [`../disabled.yaml.default`](../disabled.yaml.default)); the two are unioned.
-  `/plugins` shows the live state.
+- **Opt-in / default-OFF, env-var controlled.** Agents/skills/commands ship
+  enabled; plugins ship disabled. A developer turns one on **only** via the
+  `ENABLED_PLUGINS` list in `.env` (space/comma-separated). `disabled.yaml` does
+  *not* control plugins — it persists in a volume and would silently override
+  `.env`. The entrypoint rebuilds the plugin symlinks to match `ENABLED_PLUGINS`
+  on every boot. `/plugins` shows the live state.
 - **Loaded by symlink, not by the `plugin` array.** OpenCode auto-scans
   `plugin/*.{ts,js}` in each config dir and imports the files directly (it
   follows symlinks; verified in the 1.16.2 and 1.17.3 binaries). The entrypoint
@@ -48,10 +48,10 @@ sitting next to the real files is found automatically.
 
 Edit the `plugins-build` stage in `../Dockerfile`: clone at a pinned ref, build
 if needed, vendor runtime deps, write an `entries` manifest, and `cp` the result
-into `/staging/plugins/<name>/`. Then add the name (commented) to
-`../disabled.yaml.default` and the description map in
-`../bundle/commands/plugins.md`. Pin by tag or commit SHA — never a moving
-branch — and re-test the load on every bump. See
+into `/staging/plugins/<name>/`. Then list the new name in the `.env.example`
+`ENABLED_PLUGINS` comment, the description map in `./commands/plugins.md`, and
+the table below. Pin by tag or commit SHA — never a moving branch — and re-test
+the load on every bump. See
 [`../../docs/ADDING_PLUGINS.md`](../../docs/ADDING_PLUGINS.md).
 
 ## Currently baked

@@ -66,8 +66,8 @@ Two options.
 The entrypoint reads this file and skips the matching bundle items when it
 builds the merged config.
 
-> Plugins work the *opposite* way — they ship OFF and are opted in via the
-> `plugins.enabled` list in the same file. See
+> Plugins are **not** controlled by this file — they ship OFF and are opted in
+> via the `ENABLED_PLUGINS` variable in `.env`. See
 > [`ADDING_PLUGINS.md`](ADDING_PLUGINS.md).
 
 ## One repo only

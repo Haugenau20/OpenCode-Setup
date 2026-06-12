@@ -85,40 +85,27 @@ for kind in agents skills commands mcp; do
     symlink_bundle "${kind}"
 done
 
-# ---- 3b. Plugins: opt-in (default OFF), symlinked into plugin/ ----------------
-# OpenCode 1.16.2 auto-scans `{plugin,plugins}/*.{ts,js}` in each config dir and
-# imports the files directly (no Bun install, follows symlinks). We exploit that:
-# each baked plugin lives at ${BUNDLE}/plugins/<name>/ with an `entries` manifest
+# ---- 3b. Plugins: opt-in, enabled ONLY via the ENABLED_PLUGINS env var --------
+# OpenCode auto-scans `{plugin,plugins}/*.{ts,js}` in each config dir and imports
+# the files directly (no Bun install, follows symlinks). Each baked plugin lives
+# at ${BUNDLE}/plugins/<name>/ with an `entries` manifest
 # (`<symlink-name>=<relative/entry/path>` per line); we symlink the entry files
-# of ENABLED plugins into ${USER_CFG}/plugin/. Plugins are opt-in: a plugin is
-# linked only if its <name> appears in the ENABLED_PLUGINS env var (set in .env —
-# the easy host-side toggle) OR under `plugins: { enabled: [...] }` in
-# disabled.yaml; the two are unioned. The `plugin` array in opencode.json is
-# deliberately NOT used — it triggers a network Bun install the egress blocks.
-
-# Names listed under the nested `plugins: -> enabled:` block of disabled.yaml.
-enabled_plugins() {
-    [ -f "${DISABLED_FILE}" ] || return 0
-    awk '
-        /^plugins:/ {p=1; next}
-        p && /^[a-zA-Z]/ {p=0}                       # left the plugins: block
-        p && /^[[:space:]]+enabled:/ {e=1; next}
-        p && e && /^[[:space:]]+-/ {
-            sub(/^[[:space:]]*-[[:space:]]*/, ""); sub(/[[:space:]]*#.*/, ""); print
-        }
-        p && e && /^[[:space:]]+[a-zA-Z]/ {e=0}       # left the enabled: sub-block
-    ' "${DISABLED_FILE}"
-}
-
+# of the enabled plugins into ${USER_CFG}/plugin/.
+#
+# ENABLED_PLUGINS (set in .env on the host) is the SINGLE source of truth — a
+# space- or comma-separated list, e.g. `ENABLED_PLUGINS=superpowers dcp`. We
+# deliberately do NOT read plugin state from disabled.yaml: that file is seeded
+# into a persistent volume and would silently override .env (a real footgun).
+# The `plugin` array in opencode.json is likewise unused — it triggers a network
+# Bun install the egress blocks.
 PLUGIN_SRC="${BUNDLE}/plugins"
 PLUGIN_DST="${USER_CFG}/plugin"
 if [ -d "${PLUGIN_SRC}" ]; then
-    # Clear every plugin symlink WE manage (any link whose target is under the
-    # bundle), not just broken ones. The config dir is a persistent volume, so a
-    # link created when a plugin was enabled would otherwise linger forever and
-    # the plugin would stay on even after it's removed from ENABLED_PLUGINS. We
-    # rebuild the enabled set from scratch below. User-provided real files or
-    # their own symlinks (e.g. via USER_LAYER_PATH) are left untouched.
+    # Rebuild the enabled set from scratch each boot so ENABLED_PLUGINS is truly
+    # authoritative. Remove every symlink WE manage (target under the bundle),
+    # valid or broken — the config dir is a persistent volume, so a link from a
+    # previous boot would otherwise linger and keep a plugin on. User-provided
+    # real files / symlinks pointing outside the bundle are left untouched.
     if [ -d "${PLUGIN_DST}" ]; then
         for link in "${PLUGIN_DST}"/*; do
             [ -L "${link}" ] || continue
@@ -128,20 +115,17 @@ if [ -d "${PLUGIN_SRC}" ]; then
         done
     fi
 
-    # ENABLED_PLUGINS (set in .env on the host) is the low-friction toggle:
-    # space- or comma-separated plugin names. We union it with the file-based
-    # `plugins.enabled` list so both the easy path and per-developer
-    # disabled.yaml edits work. Tolerate commas and stray quotes from .env.
-    env_enabled="${ENABLED_PLUGINS:-}"
-    env_enabled="${env_enabled//,/ }"
-    env_enabled="${env_enabled//\"/}"
-    env_enabled="${env_enabled//\'/}"
-    enabled="$(enabled_plugins | tr '\n' ' ') ${env_enabled}"
+    # Parse ENABLED_PLUGINS: tolerate commas and stray quotes leaked from .env.
+    enabled="${ENABLED_PLUGINS:-}"
+    enabled="${enabled//,/ }"
+    enabled="${enabled//\"/}"
+    enabled="${enabled//\'/}"
+
     for dir in "${PLUGIN_SRC}"/*/; do
         [ -d "${dir}" ] || continue
         name="$(basename "${dir}")"
         if ! printf ' %s ' "${enabled}" | grep -q " ${name} "; then
-            log "plugin off: ${name} (enable via ENABLED_PLUGINS; see /plugins)"
+            log "plugin off: ${name} (enable via ENABLED_PLUGINS in .env; see /plugins)"
             continue
         fi
         [ -f "${dir}entries" ] || { log "plugin ${name}: no entries manifest, skipping"; continue; }

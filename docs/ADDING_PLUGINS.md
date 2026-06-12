@@ -39,9 +39,10 @@ array entries, which we don't use):
 
 ## Turning a plugin on or off (developer)
 
-**The easy way — `ENABLED_PLUGINS` in `.env`.** Plugins are toggled like every
-other switch in this system (`ALLOW_REMOTE_GIT`, `ENABLE_SESSION_LOGS`): one line
-in your host `.env`, then restart. No container, no YAML, no shell-in.
+Plugins are toggled by **one variable in your host `.env`** —
+`ENABLED_PLUGINS` — exactly like every other switch in this system
+(`ALLOW_REMOTE_GIT`, `ENABLE_SESSION_LOGS`). It is the **single source of truth**
+for plugins. No container, no YAML, no shell-in.
 
 ```dotenv
 # .env (on your host)
@@ -50,9 +51,10 @@ ENABLED_PLUGINS=superpowers dcp
 
 Then re-run the launcher (or `scripts/opencode`). Names are space- or
 comma-separated; available names are `superpowers`, `dcp`, `opencode-workspace`.
-The entrypoint reads `$ENABLED_PLUGINS` on boot and symlinks those plugins into
-`~/.config/opencode/plugin/`. To disable one, remove it from the line and
-restart. Verify:
+On every boot the entrypoint rebuilds the set from scratch: it removes the
+plugin symlinks it manages and re-creates only the ones named in
+`ENABLED_PLUGINS`. To disable a plugin, remove it from the line (or empty the
+line) and restart. Verify:
 
 ```bash
 docker exec opencode-<slug> ls -l /home/dev/.config/opencode/plugin/
@@ -62,23 +64,11 @@ docker exec opencode-<slug> ls -l /home/dev/.config/opencode/plugin/
 > no hot-reload. Re-running the launcher *is* the restart, so this is no extra
 > step.
 
-**The advanced way — the live `disabled.yaml`.** There's also a per-developer
-list in the **live** switch file inside the container,
-`~/.config/opencode/disabled.yaml` (seeded on first boot from the image's
-`disabled.yaml.default` template). Names under its `plugins.enabled` block are
-**unioned** with `ENABLED_PLUGINS`. This is mainly useful when you bind-mount the
-config dir with `USER_LAYER_PATH=./user-layer` and edit
-`./user-layer/disabled.yaml` from your host editor.
-
-> **Don't edit the repo's `opencode/disabled.yaml.default`** to toggle anything —
-> that's only the build-time seed, copied to the live file once on a fresh config
-> volume. Editing it does nothing to a running stack. For one-off in-container
-> edits while a `--persist` stack is up:
-> `docker exec -u dev -it opencode-<slug> vim /home/dev/.config/opencode/disabled.yaml`.
-
-> The same file's `disabled:` block turns *off* bundled agents/skills/commands
-> (those ship ON). Plugins are the opposite — opt-in — which is why they use an
-> `enabled:` list. See [`ADDING_SKILLS.md`](ADDING_SKILLS.md) for the rest.
+> **`disabled.yaml` does NOT control plugins.** That file toggles bundled
+> agents/skills/commands/mcp (which ship ON). Plugins are opt-in and driven
+> solely by `ENABLED_PLUGINS`, so there is no second, persistent source of truth
+> hiding in a volume. See [`ADDING_SKILLS.md`](ADDING_SKILLS.md) for the bundle
+> toggles.
 
 ## Why you can't just paste a GitHub plugin URL
 
@@ -100,9 +90,10 @@ This requires an image rebuild. Open a PR against this repo.
    install/prune its **runtime** dependencies, and lay the result out under
    `/staging/plugins/<name>/` with an `entries` manifest
    (`<symlink-name>=<relative/entry/path>` per line).
-2. **Default it OFF.** Add the name as a commented line under
-   `plugins.enabled` in
-   [`../opencode/disabled.yaml.default`](../opencode/disabled.yaml.default).
+2. **List it as available.** Plugins are OFF unless named in `ENABLED_PLUGINS`,
+   so there's nothing to "default off" — just add the new name to the
+   `ENABLED_PLUGINS` comment in [`../.env.example`](../.env.example) so users
+   know it exists.
 3. **Make it discoverable.** Add a one-line description to the map in
    [`../opencode/bundle/commands/plugins.md`](../opencode/bundle/commands/plugins.md)
    and a row to the table in
