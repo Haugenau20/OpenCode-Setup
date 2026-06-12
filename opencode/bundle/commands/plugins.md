@@ -13,13 +13,16 @@ Do this, then stop:
    symlink whose target is under `/opt/opencode/bundle/plugins/<name>/`, else
    `OFF`. (This reflects what the entrypoint linked from `ENABLED_PLUGINS`.)
 3. Print a compact table — one row per baked plugin — with: the plugin name,
-   `ON`/`OFF`, and a one-line description from this map:
+   `ON`/`OFF`, a one-line description, and the upstream source, from this map:
    - `superpowers` — skills library: brainstorming, writing-plans,
      systematic-debugging, TDD, requesting/receiving code review, and more.
-   - `dcp` — dynamic context pruning: trims stale tool output from the context
-     window to save tokens.
+     Source: https://github.com/obra/superpowers
+   - `dcp` — dynamic context pruning: silently trims stale tool output from the
+     context window to save tokens (no user-facing tool).
+     Source: https://github.com/Opencode-DCP/opencode-dynamic-context-pruning
    - `opencode-workspace` — `plan_save`/`plan_read` planning tools plus
      background-agent delegation (async sub-agents).
+     Source: https://github.com/kdcokenny/opencode-workspace
    (If a baked plugin isn't in this map, show its name with "(no description).")
 4. Finish with one line on how to toggle: set `ENABLED_PLUGINS` in `.env` on the
    host (space- or comma-separated, e.g. `ENABLED_PLUGINS=superpowers dcp`) and
