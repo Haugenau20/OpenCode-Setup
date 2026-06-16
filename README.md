@@ -115,6 +115,13 @@ column in `ENABLED_PLUGINS`.
 | `dcp` | Dynamic context pruning — silently trims stale tool output from the context window to save tokens (no user-facing tool). | [Opencode-DCP/opencode-dynamic-context-pruning](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning) | `v3.1.12` |
 | `opencode-workspace` | `plan_save`/`plan_read` planning tools + background-agent delegation (async sub-agents). Only the two container-safe plugins are shipped. | [kdcokenny/opencode-workspace](https://github.com/kdcokenny/opencode-workspace) | `4451c68` |
 
+> [!WARNING]
+> **Do not enable `opencode-workspace` if you use Qwen.** The extra tools and
+> system prompt it injects are rejected by Qwen's upstream, so every prompt then
+> fails with `AI_APICallError: Failed to communicate with the upstream service`.
+> Other models (e.g. MiniMax, Gemma) are unaffected. Leave this plugin disabled
+> when working with Qwen.
+
 
 ## Per-developer allowlist additions
 
