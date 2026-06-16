@@ -7,11 +7,15 @@ dependencies are already vendored in the image.
 
 ## What's baked in
 
-| Name | What it does | Default |
-|------|--------------|---------|
-| `superpowers` | Skills library — brainstorming, writing-plans, systematic-debugging, TDD, requesting/receiving code review, and more. | OFF |
-| `dcp` | Dynamic context pruning — trims stale tool output from the context window to save tokens. | OFF |
-| `opencode-workspace` | `plan_save`/`plan_read` planning tools + background-agent delegation (async sub-agents). | OFF |
+All ship **OFF** (opt-in via `ENABLED_PLUGINS`). Pinned versions and the full
+provenance table live in the [README "Plugins" section](../README.md#plugins);
+the pins themselves are set in [`../opencode/Dockerfile`](../opencode/Dockerfile).
+
+| Name | What it does | Upstream |
+|------|--------------|----------|
+| `superpowers` | Skills library — brainstorming, writing-plans, systematic-debugging, TDD, requesting/receiving code review, and more. | [obra/superpowers](https://github.com/obra/superpowers) |
+| `dcp` | Dynamic context pruning — silently trims stale tool output from the context window to save tokens. | [Opencode-DCP/opencode-dynamic-context-pruning](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning) |
+| `opencode-workspace` | `plan_save`/`plan_read` planning tools + background-agent delegation (async sub-agents). | [kdcokenny/opencode-workspace](https://github.com/kdcokenny/opencode-workspace) |
 
 Run **`/plugins`** in the TUI for the live catalog and current on/off state.
 
@@ -94,9 +98,13 @@ This requires an image rebuild. Open a PR against this repo.
    so there's nothing to "default off" — just add the new name to the
    `ENABLED_PLUGINS` comment in [`../.env.example`](../.env.example) so users
    know it exists.
-3. **Make it discoverable.** Add a one-line description to the map in
+3. **Make it discoverable + traceable.** Add a row (name, description, upstream
+   link, pinned version) to the [README "Plugins" table](../README.md#plugins)
+   — the canonical provenance — and add the name + description + `Source:` URL to
+   the map in
    [`../opencode/bundle/commands/plugins.md`](../opencode/bundle/commands/plugins.md)
-   and a row to the table in
+   (so `/plugins` shows it in the TUI). Also add a row to the tables in this
+   doc and in
    [`../opencode/bundle/plugins/README.md`](../opencode/bundle/plugins/README.md).
 
 The entrypoint does the rest: at start it symlinks the entry files of every

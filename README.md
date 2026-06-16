@@ -91,9 +91,8 @@ Three scopes (image, you-only, this-repo). See
 
 ## Plugins
 
-A curated set of OpenCode plugins (superpowers, dynamic context pruning,
-workspace planning/background-agents) is baked into the image but **off by
-default**. Turn them on the same way as every other switch — a line in `.env`:
+A curated set of OpenCode plugins is baked into the image but **off by default**.
+Turn them on the same way as every other switch — a line in `.env`:
 
 ```
 ENABLED_PLUGINS=superpowers dcp
@@ -102,6 +101,20 @@ ENABLED_PLUGINS=superpowers dcp
 then restart. No network required. Run `/plugins` in the TUI for the live
 catalog. Full details (and how to add your own) in
 [`docs/ADDING_PLUGINS.md`](docs/ADDING_PLUGINS.md).
+
+### What's baked in (and where it comes from)
+
+Every plugin is vendored at build time from a **pinned** upstream ref (the
+versions below are the source of truth in
+[`opencode/Dockerfile`](opencode/Dockerfile)). Use the names in the **Name**
+column in `ENABLED_PLUGINS`.
+
+| Name | What it does | Upstream | Pinned |
+|------|--------------|----------|--------|
+| `superpowers` | Skills library: brainstorming, writing-plans, systematic-debugging, TDD, requesting/receiving code review, and more. | [obra/superpowers](https://github.com/obra/superpowers) | `v5.1.0` (`6fd4507`) |
+| `dcp` | Dynamic context pruning — silently trims stale tool output from the context window to save tokens (no user-facing tool). | [Opencode-DCP/opencode-dynamic-context-pruning](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning) | `v3.1.12` |
+| `opencode-workspace` | `plan_save`/`plan_read` planning tools + background-agent delegation (async sub-agents). Only the two container-safe plugins are shipped. | [kdcokenny/opencode-workspace](https://github.com/kdcokenny/opencode-workspace) | `4451c68` |
+
 
 ## Per-developer allowlist additions
 
