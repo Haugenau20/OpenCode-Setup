@@ -30,13 +30,22 @@ import { z } from "zod";
 // Config
 // ---------------------------------------------------------------------------
 
-const BB_BASE_URL = process.env.BB_BASE_URL?.replace(/\/$/, "");
-const BB_AUTH = process.env.BB_AUTH;
+// Read the canonical .env names directly. docker compose passes these through
+// env_file, so they're in the container environment and inherited by whatever
+// process opencode spawns this server from (backend OR the TUI's docker exec) —
+// unlike a var only export-ed at runtime by PID 1. The HTTP Basic credential is
+// derived here from user:pat (a single PAT serves both git and the API), so
+// nothing needs to pre-encode it.
+const BB_BASE_URL = process.env.BITBUCKET_BASE_URL?.replace(/\/$/, "");
+const BB_USER = process.env.BITBUCKET_USER;
+const BB_PAT = process.env.BITBUCKET_PAT;
 const PROXY_URL = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
 
-if (!BB_BASE_URL) throw new Error("BB_BASE_URL is not set");
-if (!BB_AUTH) throw new Error("BB_AUTH is not set");
+if (!BB_BASE_URL) throw new Error("BITBUCKET_BASE_URL is not set");
+if (!BB_USER || !BB_PAT) throw new Error("BITBUCKET_USER / BITBUCKET_PAT is not set");
 if (!PROXY_URL) throw new Error("HTTP_PROXY / HTTPS_PROXY is not set");
+
+const BB_AUTH = Buffer.from(`${BB_USER}:${BB_PAT}`).toString("base64");
 
 const proxyAgent = new ProxyAgent(PROXY_URL);
 

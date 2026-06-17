@@ -5,13 +5,19 @@ import { z } from "zod";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
+// Canonical .env names, passed through by docker compose env_file and inherited
+// by whatever process spawns this server. Basic auth is derived here from
+// user:pat, so .env never holds a pre-encoded blob.
 const JIRA_BASE_URL = process.env.JIRA_BASE_URL;
-const JIRA_AUTH     = process.env.JIRA_AUTH;
+const JIRA_USER     = process.env.JIRA_USER;
+const JIRA_PAT      = process.env.JIRA_PAT;
 
-if (!JIRA_BASE_URL || !JIRA_AUTH) {
-    console.error("Missing required env vars: JIRA_BASE_URL and/or JIRA_AUTH");
+if (!JIRA_BASE_URL || !JIRA_USER || !JIRA_PAT) {
+    console.error("Missing required env vars: JIRA_BASE_URL, JIRA_USER and/or JIRA_PAT");
     process.exit(1);
 }
+
+const JIRA_AUTH = Buffer.from(`${JIRA_USER}:${JIRA_PAT}`).toString("base64");
 
 const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
 // TLS is verified against the corp CA (NODE_EXTRA_CA_CERTS, set in policy.yaml).

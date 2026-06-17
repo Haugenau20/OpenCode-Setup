@@ -173,29 +173,27 @@ chown -R "${HOST_UID}:${HOST_GID}" "${SECRETS_DIR}"
 # their env, so omitting the block entirely is what keeps an unconfigured
 # service quiet instead of noisily failing to attach.
 #
-# Auth is DERIVED here — base64 of "user:pat" for HTTP Basic — so .env never
-# holds a hand-encoded blob and a single PAT serves both git and the API. The
-# MCP child processes inherit these exported vars (and HTTP(S)_PROXY) from the
-# opencode server; the {bitbucket,jira} index.js read exactly these names.
+# The servers read their config (BITBUCKET_*/JIRA_*, HTTP(S)_PROXY) straight
+# from the environment and derive HTTP Basic themselves. Those come from the
+# .env env_file and so live in the container's stored env — inherited by any
+# process that spawns the server (the backend OR the TUI's docker exec). We do
+# NOT export derived vars here: a runtime export only lives in PID 1 and would
+# be missing if the TUI process is the one that launches the server.
 MCP_DIR=/opt/opencode/mcp-servers
 mcp_filter='.'
 mcp_jq_args=()
 
 if [ -n "${BITBUCKET_BASE_URL:-}" ] && [ -n "${BITBUCKET_USER:-}" ] \
    && [ -n "${BITBUCKET_PAT:-}" ] && [ "${DISABLE_BITBUCKET_MCP:-0}" != "1" ]; then
-    export BB_BASE_URL="$(trim "${BITBUCKET_BASE_URL}")"
-    export BB_AUTH="$(printf '%s' "$(trim "${BITBUCKET_USER}"):$(trim "${BITBUCKET_PAT}")" | base64 -w0)"
     mcp_filter="${mcp_filter} | .mcp.bitbucket = {\"type\":\"local\",\"command\":[\"node\",\$bb],\"enabled\":true}"
     mcp_jq_args+=(--arg bb "${MCP_DIR}/bitbucket/index.js")
-    log "mcp on:  bitbucket (${BB_BASE_URL})"
+    log "mcp on:  bitbucket (${BITBUCKET_BASE_URL})"
 else
     log "mcp off: bitbucket (set BITBUCKET_BASE_URL/USER/PAT to enable)"
 fi
 
 if [ -n "${JIRA_BASE_URL:-}" ] && [ -n "${JIRA_USER:-}" ] \
    && [ -n "${JIRA_PAT:-}" ] && [ "${DISABLE_JIRA_MCP:-0}" != "1" ]; then
-    export JIRA_BASE_URL="$(trim "${JIRA_BASE_URL}")"
-    export JIRA_AUTH="$(printf '%s' "$(trim "${JIRA_USER}"):$(trim "${JIRA_PAT}")" | base64 -w0)"
     mcp_filter="${mcp_filter} | .mcp.jira = {\"type\":\"local\",\"command\":[\"node\",\$jira],\"enabled\":true}"
     mcp_jq_args+=(--arg jira "${MCP_DIR}/jira/index.js")
     log "mcp on:  jira (${JIRA_BASE_URL})"

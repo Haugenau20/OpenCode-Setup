@@ -13,11 +13,6 @@ env:
   # which keeps surrounding quotes literally in the value; Bun wants a bare true.
   BUN_CONFIG_SKIP_INSTALL_PACKAGES: true
 
-  # Let Node/undici trust the corp CA (the system bundle, which update-ca-
-  # certificates populated from ca/) for any HTTPS MCP target — e.g. a Jira
-  # instance served over TLS — instead of disabling certificate verification.
-  NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
-
   # Common phone-home flags for tooling we ship.
   DO_NOT_TRACK: "1"
   NEXT_TELEMETRY_DISABLED: "1"

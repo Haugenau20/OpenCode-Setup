@@ -135,6 +135,12 @@ COPY opencode/disabled.yaml.default /etc/opencode/disabled.yaml.default
 # credentials are present in .env.
 COPY --from=mcp-build /staging/mcp-servers/ /opt/opencode/mcp-servers/
 
+# Node/undici trusts the corp CA (system bundle) for HTTPS MCP targets, e.g. a
+# TLS Jira. Baked as image ENV — not a runtime export — so it lives in the
+# container's stored env and reaches the MCP server no matter which process
+# (backend or the TUI's docker exec) spawns it.
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+
 # git-guard: block remote git ops unless ALLOW_REMOTE_GIT=1.
 COPY opencode/git-guard /usr/local/bin/git-guard
 RUN chmod +x /usr/local/bin/git-guard \

@@ -33,17 +33,24 @@ attach. When creds are absent the entrypoint omits the block entirely.
 
 A single Bitbucket **PAT** authenticates both `git` and the REST API (verified:
 the PAT works as HTTP Basic against Bitbucket's REST API), so no account
-password is stored anywhere. At boot the entrypoint:
+password is stored anywhere.
 
-1. Derives the HTTP Basic credential — `base64("<user>:<pat>")` — and exports it
-   as `BB_AUTH` / `JIRA_AUTH`. `.env` therefore never contains a pre-encoded
-   blob; you only ever paste the PAT.
-2. Exports `BB_BASE_URL` / `JIRA_BASE_URL`.
-3. `jq`-injects the matching `mcp.<name>` block into the rendered
-   `~/.config/opencode/opencode.json`.
+Each server reads the **canonical `.env` names directly** —
+`BITBUCKET_BASE_URL`/`BITBUCKET_USER`/`BITBUCKET_PAT` and the `JIRA_*`
+equivalents — and builds its own HTTP Basic header (`base64("<user>:<pat>")`)
+at startup. `.env` therefore never contains a pre-encoded blob; you only paste
+the PAT.
 
-The MCP child processes inherit those vars (and `HTTP(S)_PROXY`) from the
-opencode server. All egress goes through Squid.
+This matters for *where the values live*. Compose loads `.env` via `env_file`,
+so those vars are part of the **container's stored environment** and are
+inherited by any process that spawns the server — both the backend and the
+TUI's `docker exec`. (A value merely `export`-ed at runtime by the entrypoint
+would live only in PID 1 and be missing if the TUI launches the server, which
+is exactly what produced an early `-32000: Connection closed`.)
+
+The entrypoint's only job for MCP is gating: it `jq`-injects the matching
+`mcp.<name>` block into the rendered `~/.config/opencode/opencode.json` only
+when a service's credential trio is present. All egress goes through Squid.
 
 > **`BITBUCKET_BASE_URL` is plain HTTP on the internal instance.** Using
 > `https://` yields a TLS `wrong version number` error. Set the scheme your
@@ -51,8 +58,9 @@ opencode server. All egress goes through Squid.
 
 ## TLS
 
-Node trusts the corp CA via `NODE_EXTRA_CA_CERTS` (set in `policy.yaml`), so
-HTTPS MCP targets validate normally. The servers do **not** disable certificate
+Node trusts the corp CA via `NODE_EXTRA_CA_CERTS` (baked as image `ENV` in the
+Dockerfile, so it reaches the server whichever process spawns it), so HTTPS MCP
+targets validate normally. The servers do **not** disable certificate
 verification. If a TLS endpoint fails to connect, the fix is to bake the right
 CA into `ca/`, never to skip verification.
 
