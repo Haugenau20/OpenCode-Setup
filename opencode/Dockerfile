@@ -99,6 +99,18 @@ RUN git clone https://github.com/kdcokenny/opencode-workspace.git workspace \
           @opencode-ai/plugin@1.16.2 @opencode-ai/sdk@1.16.2 \
           zod@3.23.8 unique-names-generator@4.7.1 jsonc-parser@3.3.1
 
+# ---- MCP build: vendor first-party MCP server deps, offline-ready ------------
+# The Bitbucket and Jira MCP servers are first-party (committed under
+# opencode/mcp-servers/). Install their runtime deps here so nothing hits npm at
+# container start — the egress lock would block it. Deps are pure JS (undici,
+# zod, the MCP SDK); no native build. `base` already carries node 20 + npm.
+FROM base AS mcp-build
+COPY opencode/mcp-servers/ /staging/mcp-servers/
+RUN set -eu; for d in /staging/mcp-servers/*/; do \
+        echo "vendoring deps for ${d}"; \
+        (cd "${d}" && npm install --omit=dev --no-audit --no-fund); \
+    done
+
 # ---- Runtime: opencode + workplace bundle ------------------------------------
 FROM base AS runtime
 
@@ -117,6 +129,11 @@ COPY opencode/opencode.json /etc/opencode/opencode.json
 # config at start. disabled.yaml.default is the seed for the user's toggle file.
 COPY --from=plugins-build /staging/plugins/ /opt/opencode/bundle/plugins/
 COPY opencode/disabled.yaml.default /etc/opencode/disabled.yaml.default
+
+# First-party MCP servers (Bitbucket, Jira) with runtime deps vendored in the
+# mcp-build stage. The entrypoint wires each into opencode.json only when its
+# credentials are present in .env.
+COPY --from=mcp-build /staging/mcp-servers/ /opt/opencode/mcp-servers/
 
 # git-guard: block remote git ops unless ALLOW_REMOTE_GIT=1.
 COPY opencode/git-guard /usr/local/bin/git-guard

@@ -14,9 +14,11 @@ if (!JIRA_BASE_URL || !JIRA_AUTH) {
 }
 
 const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
-const dispatcher = proxyUrl
-    ? new ProxyAgent({ uri: proxyUrl, requestTls: { rejectUnauthorized: false } })
-    : undefined;
+// TLS is verified against the corp CA (NODE_EXTRA_CA_CERTS, set in policy.yaml).
+// Do NOT re-add rejectUnauthorized:false — a locked-down image must not skip
+// certificate verification. If a TLS Jira fails here, the CA isn't in the baked
+// bundle; fix the CA, don't disable the check.
+const dispatcher = proxyUrl ? new ProxyAgent({ uri: proxyUrl }) : undefined;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
