@@ -56,6 +56,16 @@ HTTPS MCP targets validate normally. The servers do **not** disable certificate
 verification. If a TLS endpoint fails to connect, the fix is to bake the right
 CA into `ca/`, never to skip verification.
 
+## What uses them
+
+- The **`bitbucket-pr-reviewer`** agent fetches PRs directly via the Bitbucket
+  tools (`get_pull_request`, `get_pr_changes`, `get_pr_diff`, `get_file`) instead
+  of asking for a pasted diff; it falls back to a pasted diff if the MCP is off.
+- The **`/sync-jira`** command resolves the issue key from the current branch (or
+  an argument) and pulls the ticket into context via `get_issue`.
+
+Both degrade gracefully when their MCP is disabled.
+
 ## Adding another service later
 
 Follow the same `<SERVICE>_{BASE_URL,USER,PAT}` shape, drop a server under

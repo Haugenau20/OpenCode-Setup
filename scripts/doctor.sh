@@ -143,5 +143,46 @@ else
 fi
 
 echo
+echo "== MCP servers =="
+if docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
+    # A server is enabled exactly when its credential trio is present (and not
+    # force-disabled). Verify the rendered config matches that expectation and
+    # that the runtime deps were vendored into the image.
+    check_mcp() {
+        local svc="$1" want="$2"
+        if [ "${want}" = "1" ]; then
+            if docker exec "${CONTAINER}" \
+                    jq -e ".mcp.${svc}" "${CFG}/opencode.json" >/dev/null 2>&1; then
+                ok "${svc}: enabled and wired into opencode.json"
+            else
+                bad "${svc}: credentials set but NOT wired into opencode.json (see: docker logs ${CONTAINER})"
+            fi
+            if docker exec "${CONTAINER}" \
+                    test -d "/opt/opencode/mcp-servers/${svc}/node_modules"; then
+                ok "${svc}: runtime deps vendored"
+            else
+                bad "${svc}: node_modules missing under /opt/opencode/mcp-servers/${svc} — rebuild (docker compose up -d --build)"
+            fi
+        else
+            ok "${svc}: not configured — skipped (set its <SERVICE>_{BASE_URL,USER,PAT} to enable)"
+        fi
+    }
+
+    bb_want=0
+    [ -n "${BITBUCKET_BASE_URL:-}" ] && [ -n "${BITBUCKET_USER:-}" ] \
+        && [ -n "${BITBUCKET_PAT:-}" ] && [ "${DISABLE_BITBUCKET_MCP:-0}" != "1" ] \
+        && bb_want=1
+    jira_want=0
+    [ -n "${JIRA_BASE_URL:-}" ] && [ -n "${JIRA_USER:-}" ] \
+        && [ -n "${JIRA_PAT:-}" ] && [ "${DISABLE_JIRA_MCP:-0}" != "1" ] \
+        && jira_want=1
+
+    check_mcp bitbucket "${bb_want}"
+    check_mcp jira "${jira_want}"
+else
+    warn "stack not running — skipping MCP checks"
+fi
+
+echo
 [ "${fail}" -eq 0 ] && echo "all checks passed." || echo "some checks failed."
 exit "${fail}"
