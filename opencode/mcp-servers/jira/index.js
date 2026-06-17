@@ -6,18 +6,15 @@ import { z } from "zod";
 // ── Config ────────────────────────────────────────────────────────────────────
 
 // Canonical .env names, passed through by docker compose env_file and inherited
-// by whatever process spawns this server. Basic auth is derived here from
-// user:pat, so .env never holds a pre-encoded blob.
+// by whatever process spawns this server. Jira Data Center authenticates the
+// PAT as a Bearer token (verified) — not Basic — so no username is needed.
 const JIRA_BASE_URL = process.env.JIRA_BASE_URL;
-const JIRA_USER     = process.env.JIRA_USER;
 const JIRA_PAT      = process.env.JIRA_PAT;
 
-if (!JIRA_BASE_URL || !JIRA_USER || !JIRA_PAT) {
-    console.error("Missing required env vars: JIRA_BASE_URL, JIRA_USER and/or JIRA_PAT");
+if (!JIRA_BASE_URL || !JIRA_PAT) {
+    console.error("Missing required env vars: JIRA_BASE_URL and/or JIRA_PAT");
     process.exit(1);
 }
-
-const JIRA_AUTH = Buffer.from(`${JIRA_USER}:${JIRA_PAT}`).toString("base64");
 
 const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
 // TLS is verified against the corp CA (NODE_EXTRA_CA_CERTS, set in policy.yaml).
@@ -30,7 +27,7 @@ const dispatcher = proxyUrl ? new ProxyAgent({ uri: proxyUrl }) : undefined;
 
 function jiraHeaders() {
     return {
-        "Authorization": `Basic ${JIRA_AUTH}`,
+        "Authorization": `Bearer ${JIRA_PAT}`,
         "Content-Type": "application/json",
         "Accept": "application/json"
     };
@@ -171,7 +168,7 @@ server.tool(
             const { status, ok, data: issue } = await jiraGet(`/issue/${issueKey}`);
 
             if (status === 401 || status === 403) {
-                return { content: [{ type: "text", text: `Authentication failed (${status}). Check JIRA_AUTH.` }] };
+                return { content: [{ type: "text", text: `Authentication failed (${status}). Check JIRA_PAT.` }] };
             }
             if (status === 404) {
                 return { content: [{ type: "text", text: `Issue ${issueKey} not found.` }] };
@@ -215,7 +212,7 @@ server.tool(
             const { status, ok, data } = await jiraGet(`/search?${params}`);
 
             if (status === 401 || status === 403) {
-                return { content: [{ type: "text", text: `Authentication failed (${status}). Check JIRA_AUTH.` }] };
+                return { content: [{ type: "text", text: `Authentication failed (${status}). Check JIRA_PAT.` }] };
             }
             if (status === 400) {
                 return { content: [{ type: "text", text: `Invalid JQL query: ${jql}\nCheck your query syntax and try again.` }] };

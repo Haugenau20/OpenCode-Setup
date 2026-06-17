@@ -184,9 +184,8 @@ if docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
         && [ -n "${BITBUCKET_PAT:-}" ] && [ "${DISABLE_BITBUCKET_MCP:-0}" != "1" ] \
         && bb_want=1
     jira_want=0
-    [ -n "${JIRA_BASE_URL:-}" ] && [ -n "${JIRA_USER:-}" ] \
-        && [ -n "${JIRA_PAT:-}" ] && [ "${DISABLE_JIRA_MCP:-0}" != "1" ] \
-        && jira_want=1
+    [ -n "${JIRA_BASE_URL:-}" ] && [ -n "${JIRA_PAT:-}" ] \
+        && [ "${DISABLE_JIRA_MCP:-0}" != "1" ] && jira_want=1
 
     check_mcp bitbucket "${bb_want}"
     check_mcp jira "${jira_want}"

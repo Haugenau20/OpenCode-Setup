@@ -23,7 +23,7 @@ independent — you can have API access without git, or vice versa.
 | Service   | Enabled when these are set                          | Force off               |
 |-----------|-----------------------------------------------------|-------------------------|
 | Bitbucket | `BITBUCKET_BASE_URL`, `BITBUCKET_USER`, `BITBUCKET_PAT` | `DISABLE_BITBUCKET_MCP=1` |
-| Jira      | `JIRA_BASE_URL`, `JIRA_USER`, `JIRA_PAT`            | `DISABLE_JIRA_MCP=1`    |
+| Jira      | `JIRA_BASE_URL`, `JIRA_PAT`                         | `DISABLE_JIRA_MCP=1`    |
 
 Credential presence is the gate because the servers **exit on boot** without
 their env; registering one with no creds would just produce a noisy failed
@@ -31,15 +31,17 @@ attach. When creds are absent the entrypoint omits the block entirely.
 
 ## How auth is wired (no passwords, no hand-encoding)
 
-A single Bitbucket **PAT** authenticates both `git` and the REST API (verified:
-the PAT works as HTTP Basic against Bitbucket's REST API), so no account
-password is stored anywhere.
+No account passwords are stored — both services authenticate with a PAT, each
+in the scheme its server expects (verified against the live instances):
 
-Each server reads the **canonical `.env` names directly** —
-`BITBUCKET_BASE_URL`/`BITBUCKET_USER`/`BITBUCKET_PAT` and the `JIRA_*`
-equivalents — and builds its own HTTP Basic header (`base64("<user>:<pat>")`)
-at startup. `.env` therefore never contains a pre-encoded blob; you only paste
-the PAT.
+- **Bitbucket** — a single PAT serves both `git` and the REST API, presented as
+  HTTP Basic. The server builds `base64("<BITBUCKET_USER>:<BITBUCKET_PAT>")`.
+- **Jira** (Data Center) — the PAT is presented as a **Bearer** token
+  (`Authorization: Bearer <JIRA_PAT>`); no username is involved.
+
+Each server reads the **canonical `.env` names directly** (`BITBUCKET_*`,
+`JIRA_*`) and builds its own auth header at startup. `.env` therefore never
+contains a pre-encoded blob; you only paste the PAT.
 
 This matters for *where the values live*. Compose loads `.env` via `env_file`,
 so those vars are part of the **container's stored environment** and are

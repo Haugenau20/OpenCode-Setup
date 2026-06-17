@@ -192,13 +192,13 @@ else
     log "mcp off: bitbucket (set BITBUCKET_BASE_URL/USER/PAT to enable)"
 fi
 
-if [ -n "${JIRA_BASE_URL:-}" ] && [ -n "${JIRA_USER:-}" ] \
-   && [ -n "${JIRA_PAT:-}" ] && [ "${DISABLE_JIRA_MCP:-0}" != "1" ]; then
+if [ -n "${JIRA_BASE_URL:-}" ] && [ -n "${JIRA_PAT:-}" ] \
+   && [ "${DISABLE_JIRA_MCP:-0}" != "1" ]; then
     mcp_filter="${mcp_filter} | .mcp.jira = {\"type\":\"local\",\"command\":[\"node\",\$jira],\"enabled\":true}"
     mcp_jq_args+=(--arg jira "${MCP_DIR}/jira/index.js")
     log "mcp on:  jira (${JIRA_BASE_URL})"
 else
-    log "mcp off: jira (set JIRA_BASE_URL/USER/PAT to enable)"
+    log "mcp off: jira (set JIRA_BASE_URL/PAT to enable)"
 fi
 
 # Ship the config into the global config dir (alongside bundle symlinks),
