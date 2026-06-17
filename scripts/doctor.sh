@@ -5,6 +5,18 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
+# Load .env WITHOUT sourcing it: bash would execute an unquoted value like
+# `ENABLED_PLUGINS=superpowers dcp ...` as the command `dcp`. Read KEY=VALUE
+# lines and export each value verbatim, matching how Docker Compose reads it.
+load_env() {
+    local file="$1" line
+    while IFS= read -r line || [ -n "${line}" ]; do
+        line="${line%$'\r'}"
+        case "${line}" in ''|\#*) continue ;; esac
+        case "${line}" in [A-Za-z_]*=*) export "${line}" ;; esac
+    done < "${file}"
+}
+
 fail=0
 ok()   { printf '  \033[32mOK\033[0m   %s\n' "$*"; }
 warn() { printf '  \033[33mWARN\033[0m %s\n' "$*"; }
@@ -13,8 +25,7 @@ bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$*"; fail=1; }
 echo "== .env =="
 if [ -f .env ]; then
     ok ".env present"
-    # shellcheck disable=SC1091
-    set -a; . ./.env; set +a
+    load_env ./.env
 
     for var in LLM_API_BASE LLM_API_KEY BITBUCKET_USER BITBUCKET_PAT \
                PROJECT_SLUG OPENCODE_PORT REPO_PATH HOST_UID HOST_GID; do
