@@ -1,13 +1,15 @@
 {
-  "name": "jira-mcp",
+  "name": "mcp-jira",
   "version": "1.0.0",
-  "private": true,
+  "description": "MCP server for internal Jira access",
   "type": "module",
-  "description": "Read-only, proxy-aware Jira MCP. Deps vendored at image build for offline runtime.",
   "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "undici": "^6.19.0",
-    "zod": "3.23.8"
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "undici": "^6.0.0",
+    "zod": "^3.22.0"
   }
 }
