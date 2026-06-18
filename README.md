@@ -57,7 +57,7 @@ If something doesn't work, run `./scripts/doctor.sh` first.
 
 - OpenCode backend running as a non-root user in a container.
 - All outbound traffic forced through Squid; allowlist is the LLM endpoint,
-  Bitbucket, and JIRA.
+  Bitbucket, GitLab, and JIRA.
 - Bundled workplace agents/skills/commands you can extend or disable.
 - A curated set of OpenCode plugins baked in but **off by default** — opt in per
   developer, no network needed. Run `/plugins` to see them.
@@ -123,14 +123,15 @@ column in `ENABLED_PLUGINS`.
 > when working with Qwen.
 
 
-## MCP servers (Bitbucket & Jira)
+## MCP servers (Bitbucket, GitLab & Jira)
 
-Two first-party, **read-only** MCP servers ship in the image, giving the agent
-direct access to the internal Bitbucket and Jira instances (PRs, diffs, commits,
-files; issues + JQL search). Each **auto-enables when its credentials are set**
-in `.env` — no separate switch — and a single Bitbucket PAT serves both git and
-the REST API, so no account password is stored. Full detail (env vars, the
-HTTP-not-HTTPS gotcha, TLS, adding more services) in
+Three first-party, **read-only** MCP servers ship in the image, giving the agent
+direct access to the internal Bitbucket, GitLab, and Jira instances (PRs/MRs,
+diffs, commits, files; issues + JQL search). Each **auto-enables when its
+credentials are set** in `.env` — no separate switch — and a single PAT per
+service serves both git and the REST API, so no account password is stored.
+Bitbucket and GitLab also act as git remotes over HTTPS. Full detail (env vars,
+the HTTP-vs-HTTPS gotcha, TLS, adding more services) in
 [`docs/MCP_SERVERS.md`](docs/MCP_SERVERS.md).
 
 ## Per-developer allowlist additions
