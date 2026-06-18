@@ -85,6 +85,21 @@ for kind in agents skills commands mcp; do
     symlink_bundle "${kind}"
 done
 
+# Global house-rules file. OpenCode reads ~/.config/opencode/AGENTS.md as
+# global instructions, concatenated with (not overriding) any project- or
+# user-level AGENTS.md. We symlink the bundle copy into the config dir root,
+# but never clobber a real file the developer has put there themselves — that
+# is their override, same shadow rule as the bundle kinds above.
+if [ -f "${BUNDLE}/AGENTS.md" ]; then
+    dst="${USER_CFG}/AGENTS.md"
+    [ -L "${dst}" ] && [ ! -e "${dst}" ] && rm -f "${dst}"   # drop stale link
+    if [ -e "${dst}" ] && [ ! -L "${dst}" ]; then
+        log "skip shadowed:  AGENTS.md"
+    else
+        ln -sfn "${BUNDLE}/AGENTS.md" "${dst}"
+    fi
+fi
+
 # ---- 3b. Plugins: opt-in, enabled ONLY via the ENABLED_PLUGINS env var --------
 # OpenCode auto-scans `{plugin,plugins}/*.{ts,js}` in each config dir and imports
 # the files directly (no Bun install, follows symlinks). Each baked plugin lives

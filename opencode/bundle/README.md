@@ -5,11 +5,18 @@ read-only at runtime. Anything you put here ships to every developer.
 
 ```
 bundle/
+  AGENTS.md  # global house rules, symlinked to ~/.config/opencode/AGENTS.md
   agents/    # opencode agent definitions  (<name>.md)
   skills/    # opencode skill definitions  (<name>/SKILL.md)
   commands/  # slash commands              (<name>.md)
   mcp/       # MCP server configs (e.g. RAG)
 ```
+
+`AGENTS.md` is the workplace-wide instruction file. OpenCode loads it
+globally and concatenates it with any project- or user-level `AGENTS.md`
+(additive, not overriding). Keep it short — it loads in every session, every
+repo. A developer who drops their own `~/.config/opencode/AGENTS.md` shadows
+the bundle copy, same as any other bundle item.
 
 Note the shapes opencode actually loads:
 

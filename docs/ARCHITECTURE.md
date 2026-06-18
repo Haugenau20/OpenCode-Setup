@@ -95,6 +95,7 @@ like the browser does.
 
 ```
 /opt/opencode/bundle/                # workplace-shipped agents/skills/etc.
+  AGENTS.md                          # global house rules (symlinked to config dir)
   agents/  skills/  commands/  mcp/  # read-only inside the image
   plugins/<name>/                    # opt-in plugins, built+vendored at build time
 /etc/opencode/policy.yaml            # read-only workplace policy
@@ -112,7 +113,11 @@ OpenCode reads from `~/.config/opencode/`. We layer four sources, merged at
 container start by `entrypoint.sh`:
 
 1. **Bundle** (`/opt/opencode/bundle/`) — workplace agents/skills/etc.
-   shipped in the image. Read-only.
+   shipped in the image. Read-only. This also includes `AGENTS.md`, the
+   global house-rules file, which the entrypoint symlinks to
+   `~/.config/opencode/AGENTS.md`. OpenCode loads it globally and concatenates
+   it with any project- or user-level `AGENTS.md` (additive, not overriding);
+   a developer who drops their own file in the config dir shadows it.
 2. **Policy** (`/etc/opencode/policy.yaml`) — workplace defaults that
    developers must not override (telemetry off, autoupdate off, etc.).
 3. **User layer** (`oc_cfg_${SLUG}` volume mounted at `~/.config/opencode/`).

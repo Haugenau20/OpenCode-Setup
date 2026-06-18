@@ -70,6 +70,19 @@ builds the merged config.
 > via the `ENABLED_PLUGINS` variable in `.env`. See
 > [`ADDING_PLUGINS.md`](ADDING_PLUGINS.md).
 
+## Global house rules (`AGENTS.md`)
+
+The bundle ships an `AGENTS.md` of workplace-wide instructions (e.g. "route
+service access through the `*-fetch` skills, not the raw MCP tools"). The
+entrypoint symlinks it to `~/.config/opencode/AGENTS.md`. OpenCode loads it
+globally and *concatenates* it with any project-level `<repo>/AGENTS.md` and
+user-level rules — it is additive, so it never clobbers your project's file.
+
+To override the workplace rules, drop your own `AGENTS.md` into the user-layer
+config dir (`~/.config/opencode/AGENTS.md`); a real file there shadows the
+bundle symlink. To add repo-specific rules instead, just commit an `AGENTS.md`
+to the repo root — both load together.
+
 ## One repo only
 
 Standard OpenCode location: `<repo>/.opencode/`. This is checked in with the
