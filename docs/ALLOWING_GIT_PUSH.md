@@ -41,6 +41,17 @@ prevent the **agent** from doing something irreversible by accident.
 
 ## Authentication
 
-When push is allowed, git authenticates to Bitbucket via a credential helper
-that reads `BITBUCKET_USER` and `BITBUCKET_PAT` from the environment. Both
-come from `.env`. The PAT is never written to disk inside the container.
+When push is allowed, git authenticates via a credential helper that reads the
+matching `<SERVICE>_USER` / `<SERVICE>_PAT` pair from the environment — both
+come from `.env`, and the PAT is never written to disk inside the container.
+The helper is **host-aware**: it picks the credential pair to hand back based
+on which remote host git is talking to, so a single container can push to both
+Bitbucket and GitLab without juggling credentials yourself.
+
+- **Bitbucket** — `BITBUCKET_USER` / `BITBUCKET_PAT`.
+- **GitLab** — `GITLAB_USER` / `GITLAB_PAT`. Same gate (`ALLOW_REMOTE_GIT=1`),
+  same credential-helper mechanism, just a different host and a different PAT.
+  This is the same PAT the GitLab MCP server uses for the REST API (see
+  [`docs/MCP_SERVERS.md`](MCP_SERVERS.md)) — git transport just presents it as
+  HTTP Basic (`GITLAB_USER:GITLAB_PAT`) instead of the API's `PRIVATE-TOKEN`
+  header.

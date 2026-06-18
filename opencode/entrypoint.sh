@@ -201,6 +201,15 @@ else
     log "mcp off: jira (set JIRA_BASE_URL/PAT to enable)"
 fi
 
+if [ -n "${GITLAB_BASE_URL:-}" ] && [ -n "${GITLAB_USER:-}" ] \
+   && [ -n "${GITLAB_PAT:-}" ] && [ "${DISABLE_GITLAB_MCP:-0}" != "1" ]; then
+    mcp_filter="${mcp_filter} | .mcp.gitlab = {\"type\":\"local\",\"command\":[\"node\",\$gitlab],\"enabled\":true}"
+    mcp_jq_args+=(--arg gitlab "${MCP_DIR}/gitlab/index.js")
+    log "mcp on:  gitlab (${GITLAB_BASE_URL})"
+else
+    log "mcp off: gitlab (set GITLAB_BASE_URL/USER/PAT to enable)"
+fi
+
 # Ship the config into the global config dir (alongside bundle symlinks),
 # injecting the enabled MCP blocks, and pin it so opencode loads exactly this
 # file. With no MCPs enabled the filter is a no-op passthrough.
@@ -217,14 +226,56 @@ if [ "${ENABLE_SESSION_LOGS:-1}" != "1" ]; then
 fi
 chown -R "${HOST_UID}:${HOST_GID}" "${STATE_DIR}" "${USER_CFG}"
 
-# ---- 6. Git credential helper for Bitbucket PAT ------------------------------
-if [ -n "${BITBUCKET_USER:-}" ] && [ -n "${BITBUCKET_PAT:-}" ]; then
+# ---- 6. Git credential helper: host-aware dispatch for multi-host creds ------
+# Bitbucket and GitLab each hand out their own PAT, and both can be configured
+# at once. A single unconditional helper (the old behavior) would echo ONE
+# service's creds for every host — e.g. leaking Bitbucket creds to a GitLab
+# remote. Instead we generate a helper function that reads git's credential
+# request from stdin, pulls out the `host=` line, strips any `:port` suffix,
+# and matches the bare hostname against each configured service so the right
+# username/token pair goes to the right remote (multi-host credential
+# isolation). Bare-hostname matching is robust even when git includes a port
+# in the request.
+#
+# Derive bare hostnames from the base URLs: strip the scheme (`proto://`),
+# any path, and any `:port`.
+bb_host="${BITBUCKET_BASE_URL:-}"; bb_host="${bb_host#*://}"; bb_host="${bb_host%%/*}"; bb_host="${bb_host%%:*}"
+gl_host="${GITLAB_BASE_URL:-}";    gl_host="${gl_host#*://}";    gl_host="${gl_host%%/*}";    gl_host="${gl_host%%:*}"
+
+if { [ -n "${BITBUCKET_USER:-}" ] && [ -n "${BITBUCKET_PAT:-}" ]; } \
+   || { [ -n "${GITLAB_USER:-}" ] && [ -n "${GITLAB_PAT:-}" ]; }; then
+
+    # Build the `case` arms for only the services that are actually configured.
+    # git config values cannot span physical lines (without a trailing `\`
+    # continuation), so the whole helper function must end up as ONE line in
+    # the written .gitconfig — arms are joined with `;` rather than newlines.
+    #
+    # NOTE: this is shell building shell — `cred_arms` is itself a fragment of
+    # the `!f() { ... }; f` function that ends up literally inside the written
+    # .gitconfig. Below, `\$host` / `\${host%%:*}` / etc. are escaped (leading
+    # backslash) so they stay literal $-expansions in the GENERATED helper
+    # (evaluated later, when git invokes it) — while ${bb_host} / ${BITBUCKET_USER}
+    # / etc. (no backslash) expand NOW, at generation time, baking the real
+    # hostnames/creds into the file.
+    cred_arms=""
+    if [ -n "${BITBUCKET_USER:-}" ] && [ -n "${BITBUCKET_PAT:-}" ]; then
+        cred_arms="${cred_arms}*${bb_host}) echo username=${BITBUCKET_USER}; echo password=\${BITBUCKET_PAT} ;; "
+    fi
+    if [ -n "${GITLAB_USER:-}" ] && [ -n "${GITLAB_PAT:-}" ]; then
+        cred_arms="${cred_arms}*${gl_host}) echo username=${GITLAB_USER}; echo password=\${GITLAB_PAT} ;; "
+    fi
+
+    # Default [user] identity: prefer the explicit GIT_USER_NAME/EMAIL, else
+    # fall back to whichever service is configured (Bitbucket first, to match
+    # prior behavior when both are set).
+    default_user="${BITBUCKET_USER:-${GITLAB_USER:-dev}}"
+
     cat > /home/dev/.gitconfig <<EOF
 [user]
-    name = ${GIT_USER_NAME:-${BITBUCKET_USER}}
-    email = ${GIT_USER_EMAIL:-${BITBUCKET_USER}@localhost}
+    name = ${GIT_USER_NAME:-${default_user}}
+    email = ${GIT_USER_EMAIL:-${default_user}@localhost}
 [credential]
-    helper = "!f() { echo username=${BITBUCKET_USER}; echo password=\${BITBUCKET_PAT}; }; f"
+    helper = "!f() { host=\$(sed -n 's/^host=//p' | head -n1); host=\${host%%:*}; case \"\$host\" in ${cred_arms}*) ;; esac; }; f"
 [safe]
     directory = /workspace
 EOF

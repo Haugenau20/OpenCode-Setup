@@ -1,0 +1,128 @@
+---
+name: gitlab-fetch
+description: "Fetches code context from the internal GitLab instance using the GitLab MCP tools — projects, commits, merge requests (with review comments/notes), MR diffs and changed files, and file contents. Use whenever the user wants to look up, fetch, find, search, browse, or cross-reference GitLab — even if they don't say 'GitLab' explicitly. Especially for the Jira → GitLab cross-reference: tracing a ticket to the commits/MRs that implemented it, reading an MR's diff or review discussion, finding which MR introduced a change, or reading a source file at a given ref. Trigger phrases include 'find the MR for PROJ-123', 'what changed in project X', 'show commits mentioning VAE-45', 'read file Y from gitlab repo Z', 'why was this implemented this way'. Read-only."
+---
+
+# GitLab MCP — Agent Skill
+
+Use the GitLab MCP server when you need **code context** to supplement a
+Jira issue or answer a technical question about the codebase. The primary
+workflow is **Jira → GitLab cross-reference**: start with a Jira issue,
+then use GitLab to find related commits, merge requests, and source code.
+
+In GitLab, a **project** is the repository itself — there is no separate
+project-vs-repo lookup like Bitbucket. Projects are identified by a numeric
+ID or by their URL-encoded path (`namespace/path`). Pull requests are called
+**merge requests** (MRs), and they're referenced by their **iid** (internal
+ID, scoped to the project), not a global ID.
+
+---
+
+## Workflow patterns
+
+### 0. Finding the right project (when not already known)
+
+```
+1. gitlab_list_projects(search="...") → find projects by name/path
+```
+
+Returns id, path_with_namespace, name, description, default_branch, web_url.
+Always run this first if the user hasn't supplied an exact project ID or
+`namespace/path`. Use the `id` or `path_with_namespace` as the `project`
+argument for every other tool.
+
+### 1. Tracing a Jira issue to code changes
+
+```
+1. jira_get_issue                                  → understand the ticket
+2. gitlab_get_commits(project, query="PROJ-123")   → find commits that mention the ticket key
+3. gitlab_get_merge_requests(project, state="merged") → list merged MRs around the same time
+4. gitlab_get_merge_request(project, mrIid=...)    → read review discussion/notes for context
+5. gitlab_get_mr_diff(project, mrIid=...)          → see the actual code change
+6. gitlab_get_file(project, filePath=...)          → read the affected source file
+```
+
+### 2. Understanding why something was implemented a certain way
+
+```
+1. gitlab_get_file              → read the current source code
+2. gitlab_get_commits           → find who changed this file and when
+3. gitlab_get_merge_request     → read the MR description and review notes for rationale
+```
+
+### 3. Finding which MR introduced a change
+
+```
+1. gitlab_get_commits(project, ref="main", query="feature-x") → narrow down the range
+2. gitlab_get_merge_requests(project, state="merged")         → list candidates
+3. gitlab_get_mr_changes(project, mrIid=...)                  → check which files were touched
+4. gitlab_get_mr_diff(project, mrIid=...)                      → inspect the actual diff
+```
+
+---
+
+## Tool reference
+
+### `gitlab_list_projects`
+- Optional `search`, `limit`. Call this when the project ID/path is unknown.
+- Returns: id, path_with_namespace, name, description, default_branch, web_url.
+- This is the **single discovery tool** — GitLab has no separate project/repo split.
+
+### `gitlab_get_commits`
+- **Best first tool** — lightweight, gives commit messages and authors fast.
+- Requires `project`. Use `query` to filter by Jira ticket key (e.g. `"PROJ-123"`).
+- Use `ref` to scope to a specific branch, tag, or commit.
+- Returns: commit SHAs, messages, authors, timestamps.
+
+### `gitlab_get_merge_requests`
+- Lists MRs for a project. Default `state` is `opened`; use `merged` for
+  history, `closed` for abandoned work, or `all` to see everything.
+- Returns: iid, title, state, author, source/target branches, labels, description snippet.
+
+### `gitlab_get_merge_request`
+- Fetches a single MR by `mrIid`, **including all review comments/notes**.
+- Use after `gitlab_get_merge_requests` to deep-dive into the most relevant one.
+- Returns: full description, source/target branch, approval status, discussion thread.
+
+### `gitlab_get_mr_changes`
+- Lists the files changed in an MR — ADD / MODIFY / DELETE / RENAME per file.
+- Use this for a quick overview before pulling the full diff.
+
+### `gitlab_get_mr_diff`
+- Fetches the full unified diff for an MR.
+- Use when you need the actual line-by-line code change, not just file names.
+
+### `gitlab_get_file`
+- Fetches full file contents at a branch/tag/commit ref.
+- Use `ref` to pin to the exact commit from a related commit SHA if you need
+  historical context.
+
+---
+
+## Key parameters
+
+| Parameter | Description                                                  | Example                  |
+|-----------|----------------------------------------------------------------|---------------------------|
+| project   | Numeric project ID or URL-encoded `namespace/path` — use `gitlab_list_projects` if unknown | `42`, `team/payment-service` |
+| ref       | Branch, tag, or commit SHA                                   | `main`, `release/2.4`, `abc1234` |
+| query     | String to match in commit messages                            | `PROJ-456`                |
+| state     | MR state filter for `gitlab_get_merge_requests`               | `opened`, `merged`, `closed`, `all` |
+| mrIid     | Merge request **internal ID** (scoped to the project, not global) | `17`                  |
+| filePath  | Path from repo root, no leading slash                          | `src/App.java`            |
+
+---
+
+## Tips
+
+- **Always search commits with the Jira key first** — it's the fastest way to
+  link a ticket to a code change.
+- MR IDs are **iid** (per-project), not a global MR ID — don't confuse it
+  with IDs from other projects or with commit SHAs.
+- If `gitlab_get_commits` returns nothing for a ticket key, try a keyword from
+  the ticket title instead.
+- MR review notes/comments often contain the *rationale* for implementation
+  choices that aren't in the commit message — always check them for "why" questions.
+- Use `gitlab_get_mr_changes` before `gitlab_get_mr_diff` when you only need
+  to know *which* files changed, to avoid pulling a large diff unnecessarily.
+- `gitlab_get_file` on a config file (e.g. `pom.xml`, `build.gradle`,
+  `Dockerfile`) is useful for understanding dependencies and build setup.
