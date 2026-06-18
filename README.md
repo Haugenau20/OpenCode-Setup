@@ -145,6 +145,11 @@ under `squid/allowlist.d/`. You are responsible for what you add.
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full picture
 (networks, image layout, config layering, telemetry stance).
 
+## What's new
+
+Per-version notes — what changed and whether you need to do more than rerun —
+are in [`CHANGELOG.md`](CHANGELOG.md).
+
 ## For the maintainer
 
 See [`MAINTAINERS.md`](MAINTAINERS.md).

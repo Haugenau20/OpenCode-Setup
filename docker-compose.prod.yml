@@ -1,9 +1,0 @@
-# Overlay for pulling the production image. Usage:
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-services:
-  opencode:
-    image: ${IMAGE_REGISTRY:-artifactory.internal.example/opencode-workplace}:prod
-    build: !reset null
-  squid:
-    image: ${IMAGE_REGISTRY:-artifactory.internal.example/opencode-workplace}-squid:prod
-    build: !reset null
