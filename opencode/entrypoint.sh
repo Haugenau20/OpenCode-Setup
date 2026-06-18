@@ -167,9 +167,45 @@ printf '%s' "$(trim "${LLM_API_KEY}")"  > "${SECRETS_DIR}/llm_api_key"
 chmod 600 "${SECRETS_DIR}/llm_api_base" "${SECRETS_DIR}/llm_api_key"
 chown -R "${HOST_UID}:${HOST_GID}" "${SECRETS_DIR}"
 
-# Ship the static config into the global config dir (alongside bundle symlinks)
-# and pin it explicitly so opencode loads exactly this file.
-cp /etc/opencode/opencode.json "${USER_CFG}/opencode.json"
+# ---- 4b. MCP servers: enabled by credential presence -------------------------
+# Each service's MCP is wired into opencode.json ONLY when its credentials are
+# set (and it is not explicitly disabled). The servers exit on boot without
+# their env, so omitting the block entirely is what keeps an unconfigured
+# service quiet instead of noisily failing to attach.
+#
+# The servers read their config (BITBUCKET_*/JIRA_*, HTTP(S)_PROXY) straight
+# from the environment and derive HTTP Basic themselves. Those come from the
+# .env env_file and so live in the container's stored env — inherited by any
+# process that spawns the server (the backend OR the TUI's docker exec). We do
+# NOT export derived vars here: a runtime export only lives in PID 1 and would
+# be missing if the TUI process is the one that launches the server.
+MCP_DIR=/opt/opencode/mcp-servers
+mcp_filter='.'
+mcp_jq_args=()
+
+if [ -n "${BITBUCKET_BASE_URL:-}" ] && [ -n "${BITBUCKET_USER:-}" ] \
+   && [ -n "${BITBUCKET_PAT:-}" ] && [ "${DISABLE_BITBUCKET_MCP:-0}" != "1" ]; then
+    mcp_filter="${mcp_filter} | .mcp.bitbucket = {\"type\":\"local\",\"command\":[\"node\",\$bb],\"enabled\":true}"
+    mcp_jq_args+=(--arg bb "${MCP_DIR}/bitbucket/index.js")
+    log "mcp on:  bitbucket (${BITBUCKET_BASE_URL})"
+else
+    log "mcp off: bitbucket (set BITBUCKET_BASE_URL/USER/PAT to enable)"
+fi
+
+if [ -n "${JIRA_BASE_URL:-}" ] && [ -n "${JIRA_PAT:-}" ] \
+   && [ "${DISABLE_JIRA_MCP:-0}" != "1" ]; then
+    mcp_filter="${mcp_filter} | .mcp.jira = {\"type\":\"local\",\"command\":[\"node\",\$jira],\"enabled\":true}"
+    mcp_jq_args+=(--arg jira "${MCP_DIR}/jira/index.js")
+    log "mcp on:  jira (${JIRA_BASE_URL})"
+else
+    log "mcp off: jira (set JIRA_BASE_URL/PAT to enable)"
+fi
+
+# Ship the config into the global config dir (alongside bundle symlinks),
+# injecting the enabled MCP blocks, and pin it so opencode loads exactly this
+# file. With no MCPs enabled the filter is a no-op passthrough.
+jq "${mcp_filter}" "${mcp_jq_args[@]}" /etc/opencode/opencode.json \
+    > "${USER_CFG}/opencode.json"
 export OPENCODE_CONFIG="${USER_CFG}/opencode.json"
 
 # ---- 5. Session logs: tmpfs swap if disabled ---------------------------------

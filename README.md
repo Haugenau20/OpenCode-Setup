@@ -123,6 +123,16 @@ column in `ENABLED_PLUGINS`.
 > when working with Qwen.
 
 
+## MCP servers (Bitbucket & Jira)
+
+Two first-party, **read-only** MCP servers ship in the image, giving the agent
+direct access to the internal Bitbucket and Jira instances (PRs, diffs, commits,
+files; issues + JQL search). Each **auto-enables when its credentials are set**
+in `.env` — no separate switch — and a single Bitbucket PAT serves both git and
+the REST API, so no account password is stored. Full detail (env vars, the
+HTTP-not-HTTPS gotcha, TLS, adding more services) in
+[`docs/MCP_SERVERS.md`](docs/MCP_SERVERS.md).
+
 ## Per-developer allowlist additions
 
 Drop a `*.conf` file into `extra-allowlist.d/` (gitignored) and
