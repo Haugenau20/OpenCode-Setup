@@ -11,8 +11,8 @@ canonical reference; if the code disagrees with this document, fix one of them.
   allowlist. No incidental internet access.
 - Reasonable defaults that work out of the box, with clearly defined extension
   points for per-developer customisation.
-- Easy to ship: one image, two tags (`:staging`, `:prod`), distributed via
-  Artifactory or built locally.
+- Easy to ship: one image, version-numbered tags (e.g. `0.0.5`), distributed
+  via Artifactory or built locally.
 
 ## Non-goals
 
@@ -234,8 +234,8 @@ disk.
 
 - **RAG MCP server.** Will join `oc_internal` as a third compose service.
   OpenCode will talk to it as `http://rag:PORT` — no Squid hop.
-- **TeamCity CI.** Build on push to `main`, publish `:staging`; manual
-  promotion to `:prod`.
+- **TeamCity CI.** Build on push to `main` and publish a version-tagged
+  image automatically. Today this is done manually (see `MAINTAINERS.md`).
 - **`/report-bug` slash command.** Sketched but unimplemented: bundle the
   last N session messages and sanitised env, POST to a JIRA project via the
   already-allowlisted JIRA API.

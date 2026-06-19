@@ -4,40 +4,38 @@ You maintain this repo; developers consume it. This document is for you.
 
 ## Cutting a release
 
-Today (pre-CI):
+Releases are version-numbered image tags pushed manually to Artifactory.
+Pick the next version (semver, e.g. `0.0.6`) and use it everywhere below.
 
 ```
-# 1. drop the real corp CA into ca/  (it's gitignored)
-# 2. build
-docker build -f opencode/Dockerfile -t artifactory.internal.example/opencode-workplace:staging .
-docker build -f squid/Dockerfile    -t artifactory.internal.example/opencode-workplace-squid:staging .
+VERSION=0.0.6
 
-# 3. push to artifactory
-docker push artifactory.internal.example/opencode-workplace:staging
-docker push artifactory.internal.example/opencode-workplace-squid:staging
+# 1. update CHANGELOG.md: rename [Unreleased] to [$VERSION] with today's
+#    date, fill in the "Action required" line, and commit it.
+# 2. drop the real corp CA into ca/  (it's gitignored)
+# 3. build both images, tagged with the version
+docker build -f opencode/Dockerfile -t artifactory.internal.example/opencode-workplace:$VERSION .
+docker build -f squid/Dockerfile    -t artifactory.internal.example/opencode-workplace-squid:$VERSION .
 
 # 4. smoke-test (see "Smoke test")
 
-# 5. promote to prod
-docker tag  artifactory.internal.example/opencode-workplace:staging \
-            artifactory.internal.example/opencode-workplace:prod
-docker tag  artifactory.internal.example/opencode-workplace-squid:staging \
-            artifactory.internal.example/opencode-workplace-squid:prod
-docker push artifactory.internal.example/opencode-workplace:prod
-docker push artifactory.internal.example/opencode-workplace-squid:prod
+# 5. push to artifactory
+docker push artifactory.internal.example/opencode-workplace:$VERSION
+docker push artifactory.internal.example/opencode-workplace-squid:$VERSION
 ```
 
-Later, TeamCity will do this automatically on push to `main` (with a manual
-promotion step for `:prod`).
+Then tell developers: point their `.env` at `IMAGE_TAG=$VERSION` and link
+them to the CHANGELOG entry — the "Action required" line tells them whether
+a rerun is enough or they also need to update the launcher / edit `.env`.
 
 ## Smoke test
 
 ```
-PROJECT_SLUG=smoke OPENCODE_PORT=4099 docker compose -f docker-compose.yml \
-    -f docker-compose.staging.yml up -d
+PROJECT_SLUG=smoke OPENCODE_PORT=4099 IMAGE_TAG=$VERSION \
+    docker compose up -d
 ./scripts/doctor.sh
 ./scripts/opencode --help
-docker compose -f docker-compose.yml -f docker-compose.staging.yml down
+PROJECT_SLUG=smoke docker compose down
 ```
 
 `doctor.sh` checks the LLM endpoint is reachable through squid, which is

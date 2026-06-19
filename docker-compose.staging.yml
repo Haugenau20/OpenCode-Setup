@@ -1,9 +1,0 @@
-# Overlay for pulling the staging image. Usage:
-#   docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
-services:
-  opencode:
-    image: ${IMAGE_REGISTRY:-artifactory.internal.example/opencode-workplace}:staging
-    build: !reset null
-  squid:
-    image: ${IMAGE_REGISTRY:-artifactory.internal.example/opencode-workplace}-squid:staging
-    build: !reset null
