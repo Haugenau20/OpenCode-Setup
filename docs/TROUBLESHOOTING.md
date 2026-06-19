@@ -134,56 +134,57 @@ Work through this ladder in order:
    If this works but a browser does not, add `localhost,127.0.0.1` to the
    browser or OS no-proxy settings.
 
-6. Keep `OPENCODE_PORT=4096`. The web/desktop frontend hardcodes port 4096 in
-   its API calls (upstream bug), so remapping the host port leaves the page
-   loading but unable to reach the backend.
+6. `OPENCODE_PORT` can be any free port. The **browser** web UI talks to
+   whatever origin you loaded the page from, so remapping the host port works
+   fine. (The **desktop app** defaults to `localhost:4096`; to point it at a
+   different port, use its "add server" dialog.)
 
 7. Squid is irrelevant here — it only governs the container's outbound traffic;
    inbound published ports do not go through it.
 
-## Web UI / desktop app operates from `/` instead of `/workspace`
+## Web UI / desktop app start a new session in `/` instead of `/workspace`
 
-**Symptom.** In the **web UI or desktop app**, the agent reports its working
-directory as `/` (root). Writes to your repo fail or land in the wrong place,
-and the agent may only reach your code when you name the full `/workspace/...`
-path. The **TUI does not have this problem** — it starts in `/workspace`.
+**Symptom.** In the **web UI or desktop app**, a new session's working
+directory is `/` (root) instead of your mounted repo. The agent reads from `/`,
+and writes fail or land in the wrong place. The **TUI does not have this
+problem** — it always starts in `/workspace`.
 
-**Cause.** An upstream OpenCode bug, not a fault in this setup. The image is
-correct (`WORKDIR /workspace`, `CMD ["serve"]`) and the entrypoint hands off to
-`opencode serve` from `/workspace`, but on the shipped OpenCode version
-(**1.16.2** — the latest release as of 2026-06) the **web/desktop client
-ignores the server's working directory and defaults the project root to `/`**.
-There is no flag, config, or env var to override it on this version: 1.16.2's
-`serve` has no directory option at all (confirm with
-`docker exec opencode-<slug> opencode serve --help`). The TUI escapes the bug
-only because `./scripts/opencode` (and the launcher's `--tui`) attach with
-`docker exec … -w /workspace … opencode`, which pins the project root.
-Tracking: [opencode#14445](https://github.com/anomalyco/opencode/issues/14445),
-[opencode#14460](https://github.com/anomalyco/opencode/issues/14460).
+**Fix — set the working directory when you start the session.** This is a
+one-step action in the UI, not a config change:
 
-**What to do.**
+1. Open the web UI (`http://localhost:${OPENCODE_PORT}`) or the desktop app.
+2. Click **New session**.
+3. When prompted for the working directory, type **`/workspace`**.
 
-- **Prefer the TUI** — `./scripts/opencode` or the launcher's `--tui`. This is
-  the recommended frontend until OpenCode ships a fix.
-- **If you use the web UI / desktop**, make your **first prompt** instruct the
-  agent to `cd /workspace` and work from there for the rest of the session.
+Everything in that session then runs inside `/workspace`. You set this per
+session; existing sessions keep whatever directory they were created with.
 
-**Is it dangerous?** Rooted at `/`, the agent can read across the whole
-container filesystem. The container is the security boundary — no internet
-egress (Squid allowlist), remote git gated by `git-guard` — so the practical
-blast radius is the container itself, which is disposable: if a session messes
-it up, restart fresh (`docker compose down && docker compose up -d`). It is
-still a reason to prefer the TUI and to keep the agent scoped to `/workspace`.
+> Things that do **not** fix it: appending `?directory=/workspace` to the URL,
+> or telling the agent to `cd /workspace` in your first prompt. Use the
+> New-session working-directory prompt above.
+
+**Cause.** An upstream OpenCode behavior, not a fault in this setup. The image
+is correct (`WORKDIR /workspace`, `CMD ["serve"]`) and the entrypoint hands off
+to `opencode serve` from `/workspace`. The server resolves each request's
+project directory from the client (an `x-opencode-directory` header), and the
+web/desktop client defaults a brand-new session to `/` rather than the server's
+working directory. Choosing `/workspace` in the New-session prompt sets that
+header correctly for the session. The TUI sidesteps it because
+`./scripts/opencode` (and the launcher's `--tui`) attach with
+`docker exec … -w /workspace … opencode`, pinning the directory.
+Tracking: [opencode#14445](https://github.com/anomalyco/opencode/issues/14445).
+
+**Is it dangerous?** If you leave a session rooted at `/`, the agent can read
+across the whole container filesystem. The container is the security boundary —
+no internet egress (Squid allowlist), remote git gated by `git-guard` — so the
+practical blast radius is the container itself, which is disposable: if a
+session messes it up, restart fresh (`docker compose down && docker compose up
+-d`). Setting `/workspace` at session start avoids it entirely.
 
 **How to tell when it's fixed.** After bumping the image to a newer OpenCode,
-the fix is available once `serve` exposes a directory flag:
-
-```
-docker exec opencode-<slug> opencode serve --help | grep -- --cwd
-```
-
-When that returns a match, pass `--cwd /workspace` to `opencode serve` in
-`opencode/entrypoint.sh` and the web UI will root at `/workspace` like the TUI.
+click **New session** in the web UI without touching the working directory. If
+it defaults to `/workspace` (the server's working directory) instead of `/`, the
+upstream default has been fixed and the manual step is no longer needed.
 
 ## Git push refused: "set ALLOW_REMOTE_GIT=1"
 

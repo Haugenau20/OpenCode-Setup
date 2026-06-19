@@ -5,30 +5,29 @@ against the company's internal LLM endpoint. Egress is restricted to a
 short allowlist via a Squid sidecar; nothing else gets in or out.
 
 You get one image that serves the TUI, the web UI, and the desktop app from
-a single backend. They share the same sessions and state — but see the
-known web-UI limitation below, which is why the **TUI is the recommended
-frontend** right now.
+a single backend. They share the same sessions and state. The **TUI is the
+simplest frontend** — it needs zero setup and always starts in `/workspace`.
+The web UI and desktop app work too (on any port); they just need one extra
+step per session, described below.
 
-> [!WARNING]
-> **OpenCode upstream bug — the web UI / desktop app start in `/`, not `/workspace`.**
-> On the OpenCode version baked into the image (**1.16.2** — the latest
-> release as of 2026-06), `opencode serve` roots the **web UI and desktop
-> app** at `/` instead of your mounted repo, and there is no flag/config to
-> override it on this version. The agent then reads from `/` and writes fail
-> or land in the wrong place.
+> [!NOTE]
+> **Web UI / desktop app: set the working directory to `/workspace` when you
+> start a session.** On the current OpenCode version, the web UI and desktop
+> app default a **new session's** working directory to `/` instead of your
+> mounted repo. The fix is a single step in the UI — not a config change, a URL
+> parameter, or a prompt to the agent:
 >
-> - **The TUI is unaffected.** `./scripts/opencode` and the launcher's
->   `--tui` pin it to `/workspace` — prefer the TUI.
-> - **If you use the web UI / desktop anyway**, make your *first prompt* tell
->   the agent to `cd /workspace` and work from there for the rest of the
->   session.
+> 1. Open the web UI (`http://localhost:${OPENCODE_PORT}`) or the desktop app.
+> 2. Click **New session**.
+> 3. When prompted for the working directory, type **`/workspace`**.
 >
-> Tracking upstream: [opencode#14445](https://github.com/anomalyco/opencode/issues/14445),
-> [opencode#14460](https://github.com/anomalyco/opencode/issues/14460).
-> **Re-check on every image bump** — the fix has landed once
-> `docker exec opencode-<slug> opencode serve --help` lists a `--cwd` flag.
-> Full detail + the one-line fix to apply then:
-> [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#web-ui--desktop-app-operates-from--instead-of-workspace).
+> Everything in that session then runs inside `/workspace`. (The **TUI** skips
+> this entirely — `./scripts/opencode` and the launcher's `--tui` always start
+> in `/workspace`.)
+>
+> Tracking upstream: [opencode#14445](https://github.com/anomalyco/opencode/issues/14445).
+> Full detail:
+> [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#web-ui--desktop-app-start-a-new-session-in--instead-of-workspace).
 
 ## Quickstart (developers)
 
@@ -44,12 +43,12 @@ docker compose up -d
 ./scripts/opencode            # opens the TUI; prints the web UI URL
 ```
 
-That's it. `./scripts/opencode` drops you into the TUI, which is the
-recommended frontend. The web UI is on `http://localhost:4096` (or whichever
-`OPENCODE_PORT` you set) and the desktop app — install it from
+That's it. `./scripts/opencode` drops you into the TUI, the simplest frontend.
+The web UI is on `http://localhost:4096` (or whichever `OPENCODE_PORT` you set)
+and the desktop app — install it from
 [opencode.ai/download](https://opencode.ai/download) — connects to the same
-URL, but both currently start in `/` rather than `/workspace` on OpenCode
-1.16.2 (see the warning above before using them).
+URL. Both work on any port; just set the session working directory to
+`/workspace` when you start one (see the note above).
 
 If something doesn't work, run `./scripts/doctor.sh` first.
 
