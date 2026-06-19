@@ -36,10 +36,6 @@ if [ -f .env ]; then
         fi
     done
 
-    if [ -n "${OPENCODE_PORT:-}" ] && [ "${OPENCODE_PORT}" != "4096" ]; then
-        warn "OPENCODE_PORT=${OPENCODE_PORT} — the opencode web/desktop UI hardcodes port 4096 in its API calls; remapping the host port breaks the UI even though the server is up. Keep OPENCODE_PORT=4096."
-    fi
-
     # Inline `# comment` after a value is kept literally by some docker compose
     # / .env parsers, which silently mangles interpolated settings — e.g. it
     # drops the published port so localhost:4096 becomes unreachable. (Note: the
