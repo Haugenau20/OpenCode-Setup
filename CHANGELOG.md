@@ -39,7 +39,8 @@ up. The vocabulary:
   `JFROG_{BASE_URL,PAT}` pair with the access token presented as a Bearer token.
   Tools: `list_repositories`, `get_repository`, `search_artifacts`,
   `gavc_search`, `latest_version`, `get_item_info`, `get_file`, `list_builds`,
-  `get_build`.
+  `get_build`, and `aql_search` (powerful AQL queries — read-only `find` only;
+  uses POST for the query body, with an enforced `.limit()` for large instances).
 - **`jfrog-fetch`** skill driving the new tools for artifact/dependency and
   build-info lookups.
 - Squid allowlist entry `squid/allowlist.d/40-jfrog.conf` for the Artifactory

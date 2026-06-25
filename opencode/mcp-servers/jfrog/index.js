@@ -111,6 +111,40 @@ async function jfDownload(repoKey, filePath) {
     });
 }
 
+/**
+ * Execute an AQL (Artifactory Query Language) query.
+ *
+ * This is the ONE endpoint here that uses POST rather than GET — purely because
+ * AQL travels in the request body (like an Elasticsearch _search), NOT because
+ * it mutates anything. AQL is strictly read-only: its only operation is `find`,
+ * and the language cannot express a write/move/delete/promote. The POST verb is
+ * an HTTP-transport detail, not a capability escalation.
+ *
+ * The real risk on a large instance is an UNBOUNDED query scanning millions of
+ * items, so we always enforce a `.limit(...)` (appending a default if the caller
+ * didn't supply one) and cap the returned rows as a second safety net.
+ */
+async function jfPostAql(query) {
+    const url = `${JFROG_BASE_URL}/artifactory/api/search/aql`;
+    const response = await fetch(url, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${JFROG_PAT}`,
+            Accept: "application/json",
+            "Content-Type": "text/plain",
+        },
+        body: query,
+        dispatcher: proxyAgent,
+    });
+
+    if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        throw new Error(`JFrog AQL error ${response.status}: ${body}`);
+    }
+
+    return response.json();
+}
+
 // ---------------------------------------------------------------------------
 // Zod schemas
 // ---------------------------------------------------------------------------
@@ -193,6 +227,21 @@ const GetFileSchema = z.object({
 
 const GetBuildSchema = z.object({
     buildName: z.string().describe("Build name as published to Artifactory build-info"),
+});
+
+const AqlSearchSchema = z.object({
+    query: z
+        .string()
+        .describe(
+            'A full AQL query string, e.g. items.find({"repo":"libs-release-local","name":{"$match":"*.jar"}})'
+        ),
+    limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(1000)
+        .default(100)
+        .describe("Max rows to return; also enforced as a .limit() on the query (default 100, hard max 1000)"),
 });
 
 // ---------------------------------------------------------------------------
@@ -400,6 +449,36 @@ async function getBuild(args) {
     return { buildName, found: true, count: numbers.length, builds: numbers };
 }
 
+async function aqlSearch(args) {
+    const { query, limit } = AqlSearchSchema.parse(args);
+
+    const trimmed = query.trim();
+    if (!/\.find\s*\(/.test(trimmed)) {
+        throw new Error(
+            'AQL query must contain a .find(...) clause, e.g. items.find({...}). ' +
+            "AQL is read-only — find is its only operation."
+        );
+    }
+
+    // Enforce a bound: if the caller didn't already cap the query, append our
+    // own .limit() so an unbounded query can't scan the whole (1M+ item)
+    // instance. AQL chains .sort()/.offset()/.limit() after .find(), so a
+    // trailing .limit() is valid as long as one isn't already present.
+    const bounded = /\.limit\s*\(/.test(trimmed)
+        ? trimmed
+        : `${trimmed}.limit(${limit})`;
+
+    const data = await jfPostAql(bounded);
+
+    const results = (data.results ?? []).slice(0, limit);
+    return {
+        count: results.length,
+        // AQL echoes paging info; surface it so the agent knows if results were truncated.
+        range: data.range ?? null,
+        results,
+    };
+}
+
 // ---------------------------------------------------------------------------
 // MCP server setup
 // ---------------------------------------------------------------------------
@@ -549,6 +628,32 @@ const TOOLS = [
             required: ["buildName"],
         },
     },
+    {
+        name: "aql_search",
+        description:
+            "Run an arbitrary AQL (Artifactory Query Language) query — the most powerful search available. " +
+            "AQL is READ-ONLY: its only operation is `find`, so it can never write/move/delete (the endpoint " +
+            "uses POST only because the query rides in the request body). Use it for complex, multi-criteria " +
+            "searches that the simpler tools can't express — filtering by properties, dates, sizes, checksums, " +
+            "across repos, with sorting and field projection. " +
+            'Example: items.find({"repo":"libs-release-local","$and":[{"name":{"$match":"*.jar"}},{"created":{"$gt":"2025-01-01"}}]}).sort({"$desc":["created"]}). ' +
+            "A .limit() is enforced automatically if you omit one — keep queries bounded on large instances.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                query: {
+                    type: "string",
+                    description:
+                        'Full AQL query, e.g. items.find({"repo":"libs-release-local","name":{"$match":"*.jar"}})',
+                },
+                limit: {
+                    type: "number",
+                    description: "Max rows; also applied as .limit() on the query (default 100, max 1000)",
+                },
+            },
+            required: ["query"],
+        },
+    },
 ];
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
@@ -585,6 +690,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 break;
             case "get_build":
                 result = await getBuild(args);
+                break;
+            case "aql_search":
+                result = await aqlSearch(args);
                 break;
             default:
                 throw new Error(`Unknown tool: ${name}`);

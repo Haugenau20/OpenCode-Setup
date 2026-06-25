@@ -1,6 +1,6 @@
 ---
 name: jfrog-fetch
-description: "Fetches artifact and build context from the internal JFrog Artifactory instance using the JFrog MCP tools — repositories, artifact/GAVC/latest-version search, storage item info (folder browsing, checksums, sizes), text artifact contents (poms/manifests), and CI build-info. Use whenever the user wants to look up, find, search, browse, or cross-reference Artifactory/JFrog artifacts, dependencies, or published builds — even if they don't say 'JFrog' explicitly. Trigger phrases include 'what's the latest version of com.acme:app', 'find the artifact foo-1.2.jar', 'what repos do we have', 'read the pom for X', 'what's published under libs-release-local', 'which builds exist', 'is dependency Y in Artifactory'. Read-only."
+description: "Fetches artifact and build context from the internal JFrog Artifactory instance using the JFrog MCP tools — repositories, artifact/GAVC/latest-version search, storage item info (folder browsing, checksums, sizes), text artifact contents (poms/manifests), CI build-info, and arbitrary AQL queries for complex filters (by property, date, size, checksum). Use whenever the user wants to look up, find, search, browse, or cross-reference Artifactory/JFrog artifacts, dependencies, or published builds — even if they don't say 'JFrog' explicitly. Trigger phrases include 'what's the latest version of com.acme:app', 'find the artifact foo-1.2.jar', 'what repos do we have', 'read the pom for X', 'what's published under libs-release-local', 'which builds exist', 'is dependency Y in Artifactory', 'find all jars created after <date>', 'artifacts with property Z'. Read-only."
 ---
 
 # JFrog Artifactory MCP — Agent Skill
@@ -68,6 +68,19 @@ Both return artifact API URIs; the `repoKey` and path are embedded in the URI.
 2. jfrog_get_build(buildName="my-app")  → run history (build numbers) for one build
 ```
 
+### 5. Complex / multi-criteria search (AQL)
+
+When the simple tools can't express the filter — by **property**, **date**,
+**size**, **checksum**, across repos, with sorting — use AQL:
+
+```
+1. jfrog_aql_search(query='items.find({"repo":"libs-release-local","name":{"$match":"*.jar"}}).sort({"$desc":["created"]})')
+```
+
+AQL is read-only (`find` only). Always keep it bounded — a `.limit()` is
+auto-applied if omitted, but prefer adding `.sort()` and `.include(...)` to keep
+results small and relevant on a large instance.
+
 ---
 
 ## Tool reference
@@ -107,6 +120,28 @@ Both return artifact API URIs; the `repoKey` and path are embedded in the URI.
 - `list_builds` returns all published build names; `get_build` returns the run
   history (build numbers) for one name.
 
+### `jfrog_aql_search`
+- The **most powerful** search — runs an arbitrary AQL (Artifactory Query
+  Language) query. Reach for it when the simpler tools can't express the filter:
+  searching by **properties**, creation/modification **dates**, **size**,
+  **checksums**, across multiple repos, with **sorting** and field projection.
+- Read-only: AQL's only operation is `find` — it cannot write, move, or delete
+  (the endpoint uses POST merely because the query travels in the request body).
+- Always keep queries **bounded** — on a large instance an unbounded query is
+  slow and heavy. A `.limit()` is auto-applied if you omit one; prefer to also
+  add `.sort()` and only the fields you need via `.include()`.
+- Example — JARs in a repo created this year, newest first:
+  ```
+  items.find({
+    "repo":"libs-release-local",
+    "$and":[{"name":{"$match":"*.jar"}},{"created":{"$gt":"2025-01-01"}}]
+  }).include("name","repo","path","created","size").sort({"$desc":["created"]})
+  ```
+- Example — find artifacts by a custom property:
+  ```
+  items.find({"@build.name":"my-app","@build.number":"42"})
+  ```
+
 ---
 
 ## Key parameters
@@ -134,4 +169,8 @@ Both return artifact API URIs; the `repoKey` and path are embedded in the URI.
   size/checksums/download URI instead.
 - Reading a published `.pom` is the quickest way to understand an artifact's
   declared dependencies without cloning the source repo.
+- Use `jfrog_aql_search` only when the targeted tools fall short — it's the most
+  powerful but also the heaviest. For "latest version" / "find this file" /
+  "browse this repo", the dedicated tools are faster and cheaper.
 - This MCP is **read-only** — it never deploys, deletes, or promotes artifacts.
+  AQL is no exception: its only operation is `find`.

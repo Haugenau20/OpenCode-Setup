@@ -18,13 +18,18 @@ npm at container start.
   `get_current_user`.
 - **JFrog** (`opencode/mcp-servers/jfrog/`): `list_repositories`,
   `get_repository`, `search_artifacts`, `gavc_search`, `latest_version`,
-  `get_item_info`, `get_file`, `list_builds`, `get_build`. Artifacts are
-  addressed by a **repository key** + path; Maven artifacts also by **GAVC**
-  coordinates. This is the *published-artifact* plane — for source code use
-  GitLab/Bitbucket.
+  `get_item_info`, `get_file`, `list_builds`, `get_build`, `aql_search`.
+  Artifacts are addressed by a **repository key** + path; Maven artifacts also by
+  **GAVC** coordinates. This is the *published-artifact* plane — for source code
+  use GitLab/Bitbucket.
 
-Read-only by design — they issue GETs only and never write, mirroring the
-`git:ro`-by-default posture. There is no push/comment/deploy capability.
+Read-only by design — there is no push/comment/deploy capability, mirroring the
+`git:ro`-by-default posture. Every tool issues GETs **except** JFrog's
+`aql_search`, which uses POST — but only because an AQL query rides in the
+request **body** (like an Elasticsearch `_search`), not because it writes. AQL's
+sole operation is `find`; the language cannot express a mutation, so the posture
+is still strictly read-only. To keep an unbounded query from scanning a large
+(1M+ item) instance, `aql_search` enforces a `.limit()` and caps returned rows.
 
 Bitbucket and GitLab additionally double as **git remotes** over HTTPS (clone/push);
 see [`docs/ALLOWING_GIT_PUSH.md`](ALLOWING_GIT_PUSH.md). Jira and JFrog have no
@@ -119,8 +124,9 @@ verification.
 - The **`jfrog-fetch`** skill drives the JFrog tools for artifact/dependency
   and build lookups — resolving the latest version of a library, finding where
   an artifact lives (`search_artifacts` / `gavc_search`), browsing a repo tree
-  (`get_item_info`), reading a published `.pom`/manifest (`get_file`), or
-  inspecting CI build-info (`list_builds` / `get_build`).
+  (`get_item_info`), reading a published `.pom`/manifest (`get_file`), inspecting
+  CI build-info (`list_builds` / `get_build`), or running complex multi-criteria
+  queries via `aql_search` for anything the simpler tools can't express.
 
 All four degrade gracefully when their MCP is disabled.
 
