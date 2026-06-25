@@ -182,9 +182,18 @@ if docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
     jira_want=0
     [ -n "${JIRA_BASE_URL:-}" ] && [ -n "${JIRA_PAT:-}" ] \
         && [ "${DISABLE_JIRA_MCP:-0}" != "1" ] && jira_want=1
+    gitlab_want=0
+    [ -n "${GITLAB_BASE_URL:-}" ] && [ -n "${GITLAB_USER:-}" ] \
+        && [ -n "${GITLAB_PAT:-}" ] && [ "${DISABLE_GITLAB_MCP:-0}" != "1" ] \
+        && gitlab_want=1
+    jfrog_want=0
+    [ -n "${JFROG_BASE_URL:-}" ] && [ -n "${JFROG_PAT:-}" ] \
+        && [ "${DISABLE_JFROG_MCP:-0}" != "1" ] && jfrog_want=1
 
     check_mcp bitbucket "${bb_want}"
     check_mcp jira "${jira_want}"
+    check_mcp gitlab "${gitlab_want}"
+    check_mcp jfrog "${jfrog_want}"
 else
     warn "stack not running — skipping MCP checks"
 fi

@@ -29,7 +29,27 @@ up. The vocabulary:
 
 ## [Unreleased]
 
-_Nothing yet._
+**Action required:** re-pull image + rebuild squid + edit .env (new MCP credentials)
+
+### Added
+- Read-only **JFrog Artifactory MCP server** (`opencode/mcp-servers/jfrog/`),
+  vendored into the image and auto-enabled when `JFROG_BASE_URL` + `JFROG_PAT`
+  are present in `.env` (force off with `DISABLE_JFROG_MCP=1`). JFrog is
+  API-only (no git transport), so it follows the Jira recipe: a two-value
+  `JFROG_{BASE_URL,PAT}` pair with the access token presented as a Bearer token.
+  Tools: `list_repositories`, `get_repository`, `search_artifacts`,
+  `gavc_search`, `latest_version`, `get_item_info`, `get_file`, `list_builds`,
+  `get_build`.
+- **`jfrog-fetch`** skill driving the new tools for artifact/dependency and
+  build-info lookups.
+- Squid allowlist entry `squid/allowlist.d/40-jfrog.conf` for the Artifactory
+  host (HTTPS/443).
+
+### Changed
+- `.env.example` gains a JFrog block and `DISABLE_JFROG_MCP`.
+- `scripts/doctor.sh` now also verifies the GitLab and JFrog MCP wiring (GitLab
+  was previously not checked).
+- Docs (`README.md`, `docs/MCP_SERVERS.md`) updated to cover four MCP servers.
 
 ## [0.0.5] — 2026-06-18
 

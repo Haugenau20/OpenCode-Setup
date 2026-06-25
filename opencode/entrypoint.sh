@@ -225,6 +225,18 @@ else
     log "mcp off: gitlab (set GITLAB_BASE_URL/USER/PAT to enable)"
 fi
 
+# JFrog is API-only (no git transport), so — like Jira — it gates on a
+# BASE_URL + PAT pair, with the PAT presented as a Bearer access token. No
+# JFROG_USER and no git-credential-helper changes below.
+if [ -n "${JFROG_BASE_URL:-}" ] && [ -n "${JFROG_PAT:-}" ] \
+   && [ "${DISABLE_JFROG_MCP:-0}" != "1" ]; then
+    mcp_filter="${mcp_filter} | .mcp.jfrog = {\"type\":\"local\",\"command\":[\"node\",\$jfrog],\"enabled\":true}"
+    mcp_jq_args+=(--arg jfrog "${MCP_DIR}/jfrog/index.js")
+    log "mcp on:  jfrog (${JFROG_BASE_URL})"
+else
+    log "mcp off: jfrog (set JFROG_BASE_URL/PAT to enable)"
+fi
+
 # Ship the config into the global config dir (alongside bundle symlinks),
 # injecting the enabled MCP blocks, and pin it so opencode loads exactly this
 # file. With no MCPs enabled the filter is a no-op passthrough.

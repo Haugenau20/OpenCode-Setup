@@ -1,9 +1,10 @@
-# MCP servers (Bitbucket, GitLab & Jira)
+# MCP servers (Bitbucket, GitLab, Jira & JFrog)
 
-The image ships three first-party, **read-only** MCP servers that let the agent
-query the internal Bitbucket, GitLab, and Jira instances directly — all already
-on the Squid allowlist. They are `type: local` stdio servers (`node`), with
-their runtime deps vendored at build time so nothing hits npm at container start.
+The image ships four first-party, **read-only** MCP servers that let the agent
+query the internal Bitbucket, GitLab, Jira, and JFrog Artifactory instances
+directly — all already on the Squid allowlist. They are `type: local` stdio
+servers (`node`), with their runtime deps vendored at build time so nothing hits
+npm at container start.
 
 - **Bitbucket** (`opencode/mcp-servers/bitbucket/`): `list_projects`,
   `list_repos`, `get_commits`, `get_pull_requests`, `get_pull_request`,
@@ -15,12 +16,19 @@ their runtime deps vendored at build time so nothing hits npm at container start
   URL-encoded `namespace/path`. Pull requests are called **merge requests**.
 - **Jira** (`opencode/mcp-servers/jira/`): `get_issue`, `search` (JQL),
   `get_current_user`.
+- **JFrog** (`opencode/mcp-servers/jfrog/`): `list_repositories`,
+  `get_repository`, `search_artifacts`, `gavc_search`, `latest_version`,
+  `get_item_info`, `get_file`, `list_builds`, `get_build`. Artifacts are
+  addressed by a **repository key** + path; Maven artifacts also by **GAVC**
+  coordinates. This is the *published-artifact* plane — for source code use
+  GitLab/Bitbucket.
 
 Read-only by design — they issue GETs only and never write, mirroring the
-`git:ro`-by-default posture. There is no push/comment capability.
+`git:ro`-by-default posture. There is no push/comment/deploy capability.
 
 Bitbucket and GitLab additionally double as **git remotes** over HTTPS (clone/push);
-see [`docs/ALLOWING_GIT_PUSH.md`](ALLOWING_GIT_PUSH.md). Jira has no git transport.
+see [`docs/ALLOWING_GIT_PUSH.md`](ALLOWING_GIT_PUSH.md). Jira and JFrog have no
+git transport — they are API-only.
 
 ## Enabling them
 
@@ -33,6 +41,7 @@ independent — you can have API access without git, or vice versa.
 | Bitbucket | `BITBUCKET_BASE_URL`, `BITBUCKET_USER`, `BITBUCKET_PAT` | `DISABLE_BITBUCKET_MCP=1` |
 | GitLab    | `GITLAB_BASE_URL`, `GITLAB_USER`, `GITLAB_PAT`       | `DISABLE_GITLAB_MCP=1`  |
 | Jira      | `JIRA_BASE_URL`, `JIRA_PAT`                         | `DISABLE_JIRA_MCP=1`    |
+| JFrog     | `JFROG_BASE_URL`, `JFROG_PAT`                       | `DISABLE_JFROG_MCP=1`   |
 
 Credential presence is the gate because the servers **exit on boot** without
 their env; registering one with no creds would just produce a noisy failed
@@ -52,9 +61,13 @@ the scheme its server expects (verified against the live instances):
   (`GITLAB_USER:GITLAB_PAT`), same shape as Bitbucket.
 - **Jira** (Data Center) — the PAT is presented as a **Bearer** token
   (`Authorization: Bearer <JIRA_PAT>`); no username is involved.
+- **JFrog** (Artifactory) — the access token is presented as a **Bearer** token
+  too (`Authorization: Bearer <JFROG_PAT>`); no username is involved. Same shape
+  as Jira because JFrog is likewise API-only (no git plane). The server appends
+  `/artifactory/api` to `JFROG_BASE_URL`.
 
 Each server reads the **canonical `.env` names directly** (`BITBUCKET_*`,
-`GITLAB_*`, `JIRA_*`) and builds its own auth header at startup. `.env`
+`GITLAB_*`, `JIRA_*`, `JFROG_*`) and builds its own auth header at startup. `.env`
 therefore never contains a pre-encoded blob; you only paste the PAT.
 
 This matters for *where the values live*. Compose loads `.env` via `env_file`,
@@ -74,6 +87,12 @@ when a service's credential trio is present. All egress goes through Squid.
 >
 > **`GITLAB_BASE_URL` is HTTPS**, unlike Bitbucket above — no trailing slash
 > either way.
+>
+> **`JFROG_BASE_URL` is HTTPS** and is the JFrog *platform* base — the server
+> appends `/artifactory/api` itself, so set it to e.g.
+> `https://jfrog.internal.example` (no `/artifactory`, no trailing slash). If
+> your image registry (`IMAGE_REGISTRY`) is the same host, one allowlist entry
+> covers both.
 
 ## TLS
 
@@ -97,8 +116,13 @@ verification.
   "what changed in this MR" or "read this file from GitLab" requests.
 - The **`/sync-jira`** command resolves the issue key from the current branch (or
   an argument) and pulls the ticket into context via `get_issue`.
+- The **`jfrog-fetch`** skill drives the JFrog tools for artifact/dependency
+  and build lookups — resolving the latest version of a library, finding where
+  an artifact lives (`search_artifacts` / `gavc_search`), browsing a repo tree
+  (`get_item_info`), reading a published `.pom`/manifest (`get_file`), or
+  inspecting CI build-info (`list_builds` / `get_build`).
 
-All three degrade gracefully when their MCP is disabled.
+All four degrade gracefully when their MCP is disabled.
 
 ## Adding another service later
 
@@ -111,3 +135,11 @@ example of this recipe end to end — same env-var shape, its own
 `squid/allowlist.d/30-gitlab.conf`, and a REST auth scheme (`PRIVATE-TOKEN`)
 that differs from both Bitbucket and Jira, proving the recipe doesn't assume
 one auth style.
+
+**JFrog** is the most recent worked example, and shows the *API-only* variant
+of the recipe (like Jira, no git plane): a two-value `JFROG_{BASE_URL,PAT}` pair
+(no `_USER`), Bearer auth, its own `squid/allowlist.d/40-jfrog.conf`, a
+credential-gated block in the entrypoint that does **not** touch the
+git-credential helper, and a `jfrog-fetch` skill. The Dockerfile needed no
+change — its `mcp-build` stage globs every directory under
+`opencode/mcp-servers/*`, so a new server folder is vendored automatically.
