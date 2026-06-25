@@ -45,12 +45,26 @@ up. The vocabulary:
   build-info lookups.
 - Squid allowlist entry `squid/allowlist.d/40-jfrog.conf` for the Artifactory
   host (HTTPS/443).
+- Read-only **Confluence MCP server** (`opencode/mcp-servers/confluence/`),
+  vendored into the image and auto-enabled when `CONFLUENCE_BASE_URL` +
+  `CONFLUENCE_PAT` are present in `.env` (force off with
+  `DISABLE_CONFLUENCE_MCP=1`). API-only, following the Jira recipe: a two-value
+  pair with the PAT presented as a Bearer token, appending `/rest/api` to the
+  base URL. Tools: `get_page` (by id or space+title), `search` (CQL),
+  `get_page_children`, `list_spaces`, `get_current_user`.
+- **`confluence-fetch`** skill driving the new tools for wiki/documentation
+  lookups (read a page, CQL search, browse a space's tree).
+- Squid allowlist entry `squid/allowlist.d/50-confluence.conf` for the
+  Confluence host, plus port **8090** added to `Safe_ports` and `SSL_ports` in
+  `squid/squid.conf` (Confluence's default HTTP connector).
 
 ### Changed
-- `.env.example` gains a JFrog block and `DISABLE_JFROG_MCP`.
-- `scripts/doctor.sh` now also verifies the GitLab and JFrog MCP wiring (GitLab
-  was previously not checked).
-- Docs (`README.md`, `docs/MCP_SERVERS.md`) updated to cover four MCP servers.
+- `.env.example` gains a JFrog block and `DISABLE_JFROG_MCP`, plus a Confluence
+  block and `DISABLE_CONFLUENCE_MCP`.
+- `scripts/doctor.sh` now also verifies the GitLab, JFrog, and Confluence MCP
+  wiring (GitLab was previously not checked).
+- Docs (`README.md`, `docs/MCP_SERVERS.md`, `opencode/bundle/AGENTS.md`) updated
+  to cover five MCP servers.
 
 ## [0.0.5] — 2026-06-18
 

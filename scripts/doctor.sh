@@ -189,11 +189,15 @@ if docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
     jfrog_want=0
     [ -n "${JFROG_BASE_URL:-}" ] && [ -n "${JFROG_PAT:-}" ] \
         && [ "${DISABLE_JFROG_MCP:-0}" != "1" ] && jfrog_want=1
+    confluence_want=0
+    [ -n "${CONFLUENCE_BASE_URL:-}" ] && [ -n "${CONFLUENCE_PAT:-}" ] \
+        && [ "${DISABLE_CONFLUENCE_MCP:-0}" != "1" ] && confluence_want=1
 
     check_mcp bitbucket "${bb_want}"
     check_mcp jira "${jira_want}"
     check_mcp gitlab "${gitlab_want}"
     check_mcp jfrog "${jfrog_want}"
+    check_mcp confluence "${confluence_want}"
 else
     warn "stack not running — skipping MCP checks"
 fi

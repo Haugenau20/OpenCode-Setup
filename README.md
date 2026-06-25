@@ -56,7 +56,7 @@ If something doesn't work, run `./scripts/doctor.sh` first.
 
 - OpenCode backend running as a non-root user in a container.
 - All outbound traffic forced through Squid; allowlist is the LLM endpoint,
-  Bitbucket, GitLab, JIRA, and JFrog Artifactory.
+  Bitbucket, GitLab, JIRA, JFrog Artifactory, and Confluence.
 - Bundled workplace agents/skills/commands you can extend or disable.
 - A curated set of OpenCode plugins baked in but **off by default** — opt in per
   developer, no network needed. Run `/plugins` to see them.
@@ -122,16 +122,17 @@ column in `ENABLED_PLUGINS`.
 > when working with Qwen.
 
 
-## MCP servers (Bitbucket, GitLab, Jira & JFrog)
+## MCP servers (Bitbucket, GitLab, Jira, JFrog & Confluence)
 
-Four first-party, **read-only** MCP servers ship in the image, giving the agent
-direct access to the internal Bitbucket, GitLab, Jira, and JFrog Artifactory
-instances (PRs/MRs, diffs, commits, files; issues + JQL search; artifacts,
-versions + build-info). Each **auto-enables when its credentials are set** in
-`.env` — no separate switch — and a single PAT per service serves both git and
-the REST API where applicable, so no account password is stored. Bitbucket and
-GitLab also act as git remotes over HTTPS; Jira and JFrog are API-only. Full
-detail (env vars, the HTTP-vs-HTTPS gotcha, TLS, adding more services) in
+Five first-party, **read-only** MCP servers ship in the image, giving the agent
+direct access to the internal Bitbucket, GitLab, Jira, JFrog Artifactory, and
+Confluence instances (PRs/MRs, diffs, commits, files; issues + JQL search;
+artifacts, versions + build-info; wiki pages + CQL search). Each **auto-enables
+when its credentials are set** in `.env` — no separate switch — and a single PAT
+per service serves both git and the REST API where applicable, so no account
+password is stored. Bitbucket and GitLab also act as git remotes over HTTPS;
+Jira, JFrog and Confluence are API-only. Full detail (env vars, the
+HTTP-vs-HTTPS gotcha, the Confluence 8090 port, TLS, adding more services) in
 [`docs/MCP_SERVERS.md`](docs/MCP_SERVERS.md).
 
 ## Per-developer allowlist additions

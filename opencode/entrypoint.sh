@@ -237,6 +237,19 @@ else
     log "mcp off: jfrog (set JFROG_BASE_URL/PAT to enable)"
 fi
 
+# Confluence is API-only (no git transport), so — like Jira — it gates on a
+# BASE_URL + PAT pair, with the PAT presented as a Bearer access token. If your
+# Confluence listens on its default 8090 connector, include the port in the
+# BASE_URL (that port is opened in squid.conf).
+if [ -n "${CONFLUENCE_BASE_URL:-}" ] && [ -n "${CONFLUENCE_PAT:-}" ] \
+   && [ "${DISABLE_CONFLUENCE_MCP:-0}" != "1" ]; then
+    mcp_filter="${mcp_filter} | .mcp.confluence = {\"type\":\"local\",\"command\":[\"node\",\$confluence],\"enabled\":true}"
+    mcp_jq_args+=(--arg confluence "${MCP_DIR}/confluence/index.js")
+    log "mcp on:  confluence (${CONFLUENCE_BASE_URL})"
+else
+    log "mcp off: confluence (set CONFLUENCE_BASE_URL/PAT to enable)"
+fi
+
 # Ship the config into the global config dir (alongside bundle symlinks),
 # injecting the enabled MCP blocks, and pin it so opencode loads exactly this
 # file. With no MCPs enabled the filter is a no-op passthrough.

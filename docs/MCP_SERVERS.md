@@ -1,10 +1,10 @@
-# MCP servers (Bitbucket, GitLab, Jira & JFrog)
+# MCP servers (Bitbucket, GitLab, Jira, JFrog & Confluence)
 
-The image ships four first-party, **read-only** MCP servers that let the agent
-query the internal Bitbucket, GitLab, Jira, and JFrog Artifactory instances
-directly — all already on the Squid allowlist. They are `type: local` stdio
-servers (`node`), with their runtime deps vendored at build time so nothing hits
-npm at container start.
+The image ships five first-party, **read-only** MCP servers that let the agent
+query the internal Bitbucket, GitLab, Jira, JFrog Artifactory, and Confluence
+instances directly — all already on the Squid allowlist. They are `type: local`
+stdio servers (`node`), with their runtime deps vendored at build time so nothing
+hits npm at container start.
 
 - **Bitbucket** (`opencode/mcp-servers/bitbucket/`): `list_projects`,
   `list_repos`, `get_commits`, `get_pull_requests`, `get_pull_request`,
@@ -22,6 +22,11 @@ npm at container start.
   Artifacts are addressed by a **repository key** + path; Maven artifacts also by
   **GAVC** coordinates. This is the *published-artifact* plane — for source code
   use GitLab/Bitbucket.
+- **Confluence** (`opencode/mcp-servers/confluence/`): `get_page` (by id, or by
+  space+title), `search` (CQL), `get_page_children`, `list_spaces`,
+  `get_current_user`. This is the *documentation/wiki* plane — pages live in a
+  **space** (by space key) and form a tree of numeric **content ids**. For
+  issues use Jira; for source use GitLab/Bitbucket.
 
 Read-only by design — there is no push/comment/deploy capability, mirroring the
 `git:ro`-by-default posture. Every tool issues GETs **except** JFrog's
@@ -32,8 +37,8 @@ is still strictly read-only. To keep an unbounded query from scanning a large
 (1M+ item) instance, `aql_search` enforces a `.limit()` and caps returned rows.
 
 Bitbucket and GitLab additionally double as **git remotes** over HTTPS (clone/push);
-see [`docs/ALLOWING_GIT_PUSH.md`](ALLOWING_GIT_PUSH.md). Jira and JFrog have no
-git transport — they are API-only.
+see [`docs/ALLOWING_GIT_PUSH.md`](ALLOWING_GIT_PUSH.md). Jira, JFrog and Confluence
+have no git transport — they are API-only.
 
 ## Enabling them
 
@@ -47,6 +52,7 @@ independent — you can have API access without git, or vice versa.
 | GitLab    | `GITLAB_BASE_URL`, `GITLAB_USER`, `GITLAB_PAT`       | `DISABLE_GITLAB_MCP=1`  |
 | Jira      | `JIRA_BASE_URL`, `JIRA_PAT`                         | `DISABLE_JIRA_MCP=1`    |
 | JFrog     | `JFROG_BASE_URL`, `JFROG_PAT`                       | `DISABLE_JFROG_MCP=1`   |
+| Confluence| `CONFLUENCE_BASE_URL`, `CONFLUENCE_PAT`            | `DISABLE_CONFLUENCE_MCP=1` |
 
 Credential presence is the gate because the servers **exit on boot** without
 their env; registering one with no creds would just produce a noisy failed
@@ -70,10 +76,13 @@ the scheme its server expects (verified against the live instances):
   too (`Authorization: Bearer <JFROG_PAT>`); no username is involved. Same shape
   as Jira because JFrog is likewise API-only (no git plane). The server appends
   `/artifactory/api` to `JFROG_BASE_URL`.
+- **Confluence** (Data Center) — the PAT is presented as a **Bearer** token
+  (`Authorization: Bearer <CONFLUENCE_PAT>`); no username is involved, same shape
+  as Jira. The server appends `/rest/api` to `CONFLUENCE_BASE_URL`.
 
 Each server reads the **canonical `.env` names directly** (`BITBUCKET_*`,
-`GITLAB_*`, `JIRA_*`, `JFROG_*`) and builds its own auth header at startup. `.env`
-therefore never contains a pre-encoded blob; you only paste the PAT.
+`GITLAB_*`, `JIRA_*`, `JFROG_*`, `CONFLUENCE_*`) and builds its own auth header at
+startup. `.env` therefore never contains a pre-encoded blob; you only paste the PAT.
 
 This matters for *where the values live*. Compose loads `.env` via `env_file`,
 so those vars are part of the **container's stored environment** and are
@@ -98,6 +107,15 @@ when a service's credential trio is present. All egress goes through Squid.
 > `https://jfrog.internal.example` (no `/artifactory`, no trailing slash). If
 > your image registry (`IMAGE_REGISTRY`) is the same host, one allowlist entry
 > covers both.
+>
+> **`CONFLUENCE_BASE_URL` is the site base** — the server appends `/rest/api`
+> itself. Confluence's default connector is **HTTP on port 8090**, so include the
+> port: `http://confluence.internal.example:8090` (no trailing slash). That port
+> is opened in `squid.conf` (both `Safe_ports` for plain HTTP and `SSL_ports` in
+> case your instance fronts it with TLS) — this is the one new server here that
+> needed a `squid.conf` port change, the same way Bitbucket's git plane needed
+> `7990`. If your Confluence is served over standard HTTPS (443) instead, use
+> `https://...` with no port and no `squid.conf` change is required.
 
 ## TLS
 
@@ -127,8 +145,14 @@ verification.
   (`get_item_info`), reading a published `.pom`/manifest (`get_file`), inspecting
   CI build-info (`list_builds` / `get_build`), or running complex multi-criteria
   queries via `aql_search` for anything the simpler tools can't express.
+- The **`confluence-fetch`** skill drives the Confluence tools for
+  documentation/wiki lookups — reading a page (`get_page` by id or space+title),
+  searching the wiki with CQL (`search`), browsing a space's page tree
+  (`get_page_children`), or discovering spaces (`list_spaces`). A common
+  cross-reference is **Jira → Confluence**: from a ticket to its linked spec or
+  runbook page.
 
-All four degrade gracefully when their MCP is disabled.
+All five degrade gracefully when their MCP is disabled.
 
 ## Adding another service later
 
@@ -142,10 +166,18 @@ example of this recipe end to end — same env-var shape, its own
 that differs from both Bitbucket and Jira, proving the recipe doesn't assume
 one auth style.
 
-**JFrog** is the most recent worked example, and shows the *API-only* variant
-of the recipe (like Jira, no git plane): a two-value `JFROG_{BASE_URL,PAT}` pair
-(no `_USER`), Bearer auth, its own `squid/allowlist.d/40-jfrog.conf`, a
-credential-gated block in the entrypoint that does **not** touch the
-git-credential helper, and a `jfrog-fetch` skill. The Dockerfile needed no
-change — its `mcp-build` stage globs every directory under
+**JFrog** shows the *API-only* variant of the recipe (like Jira, no git plane):
+a two-value `JFROG_{BASE_URL,PAT}` pair (no `_USER`), Bearer auth, its own
+`squid/allowlist.d/40-jfrog.conf`, a credential-gated block in the entrypoint
+that does **not** touch the git-credential helper, and a `jfrog-fetch` skill. The
+Dockerfile needed no change — its `mcp-build` stage globs every directory under
 `opencode/mcp-servers/*`, so a new server folder is vendored automatically.
+
+**Confluence** is the most recent worked example, and adds the one wrinkle the
+others didn't hit: a **non-standard port**. It's the same API-only,
+Bearer-auth, two-value `CONFLUENCE_{BASE_URL,PAT}` shape as Jira/JFrog, with its
+own `squid/allowlist.d/50-confluence.conf` and a `confluence-fetch` skill — but
+because Confluence's default connector is HTTP on **8090**, that port had to be
+opened in `squid.conf` (`Safe_ports`, plus `SSL_ports` to cover a TLS-fronted
+instance). The allowlist `.conf` files take **hostnames only**; ports always go
+in `squid.conf`, exactly as Bitbucket's git port `7990` does.
