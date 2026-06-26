@@ -111,11 +111,41 @@ when a service's credential trio is present. All egress goes through Squid.
 > **`CONFLUENCE_BASE_URL` is the site base** — the server appends `/rest/api`
 > itself. Confluence's default connector is **HTTP on port 8090**, so include the
 > port: `http://confluence.internal.example:8090` (no trailing slash). That port
-> is opened in `squid.conf` (both `Safe_ports` for plain HTTP and `SSL_ports` in
-> case your instance fronts it with TLS) — this is the one new server here that
-> needed a `squid.conf` port change, the same way Bitbucket's git plane needed
-> `7990`. If your Confluence is served over standard HTTPS (443) instead, use
-> `https://...` with no port and no `squid.conf` change is required.
+> must be in **both** `Safe_ports` and `SSL_ports` in `squid.conf` — see the
+> CONNECT note below for why even a plain-HTTP target needs `SSL_ports`.
+
+## Proxy ports: every MCP target port must be in `SSL_ports`
+
+This is the non-obvious one, and it has burned at least one afternoon of
+debugging. The MCP servers' HTTP client (undici `ProxyAgent`) reaches squid via
+an **HTTP `CONNECT` tunnel for every request — including plain `http://`
+targets** — not a normal proxied `GET`. squid only permits `CONNECT` to ports in
+`SSL_ports` (`http_access deny CONNECT !SSL_ports`). So:
+
+- A service's port must be in **`SSL_ports`**, not just `Safe_ports`, or its MCP
+  calls fail with a **denied `CONNECT` (403)**.
+- This is true even for plaintext HTTP. JFrog/Bitbucket on `http://…:80` need
+  **`80` in `SSL_ports`** (it's there now); Confluence on `:8090` needs `8090`
+  there; an HTTPS service on `:443` is already covered.
+
+The confusing part: a plain `curl` through the proxy to the *same* URL **works**,
+because curl issues a normal proxied `GET` (allowed via `Safe_ports`). So "curl
+works but the MCP gets a DNS/SERVFAIL/403 error" is the signature of a port
+that's in `Safe_ports` but missing from `SSL_ports`. To reproduce what the MCP
+actually does, force a tunnel: `curl --proxytunnel --proxy http://squid:3128
+http://<host>:<port>/…` — if that returns `403` while the plain proxied curl
+returns `200`, add `<port>` to `SSL_ports`.
+
+> Related gotcha — `NO_PROXY` and a `.local` corp domain: `NO_PROXY` (in
+> `docker-compose.yml` and `policy.yaml`) includes `.local`. A plain `curl` to a
+> `*.local` **FQDN** will *bypass* the proxy entirely (curl honors `NO_PROXY`),
+> connect directly, and fail since the opencode container has no egress — another
+> "works in theory, fails in practice" trap when testing by hand. The MCP client
+> does **not** consult `NO_PROXY` (the `ProxyAgent` is an explicit dispatcher),
+> so this only bites manual `curl` testing. Test with `env no_proxy= NO_PROXY=
+> curl …` to mirror the MCP. If you address services by their `.local` FQDN and
+> want `curl` to behave, either clear `NO_PROXY` for the test or drop `.local`
+> from it.
 
 ## TLS
 

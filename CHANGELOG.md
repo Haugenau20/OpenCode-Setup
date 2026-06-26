@@ -58,6 +58,15 @@ up. The vocabulary:
   Confluence host, plus port **8090** added to `Safe_ports` and `SSL_ports` in
   `squid/squid.conf` (Confluence's default HTTP connector).
 
+### Fixed
+- **Plain-HTTP MCP targets on port 80** (e.g. JFrog/Bitbucket served over
+  `http://…:80`) failed with a denied `CONNECT` (403). The MCP HTTP client
+  (undici `ProxyAgent`) tunnels via `CONNECT` for every request — even plain
+  HTTP — and squid only allows `CONNECT` to `SSL_ports`. Added `80` to
+  `SSL_ports` in `squid/squid.conf` and documented that **every MCP target port
+  must be in `SSL_ports`, not just `Safe_ports`** (with the `curl`-works-but-MCP-
+  fails signature and the `--proxytunnel` repro) in `docs/MCP_SERVERS.md`.
+
 ### Changed
 - `.env.example` gains a JFrog block and `DISABLE_JFROG_MCP`, plus a Confluence
   block and `DISABLE_CONFLUENCE_MCP`.
