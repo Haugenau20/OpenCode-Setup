@@ -29,7 +29,56 @@ up. The vocabulary:
 
 ## [Unreleased]
 
-_Nothing yet._
+## [0.0.6] — 2026-06-26
+
+**Action required:** re-pull image + rebuild squid + edit .env (new MCP credentials)
+
+### Added
+- Read-only **JFrog Artifactory MCP server** (`opencode/mcp-servers/jfrog/`),
+  vendored into the image and auto-enabled when `JFROG_BASE_URL` + `JFROG_PAT`
+  are present in `.env` (force off with `DISABLE_JFROG_MCP=1`). JFrog is
+  API-only (no git transport), so it follows the Jira recipe: a two-value
+  `JFROG_{BASE_URL,PAT}` pair with the access token presented as a Bearer token.
+  Tools: `list_repositories`, `get_repository`, `search_artifacts`,
+  `gavc_search`, `latest_version`, `get_item_info`, `get_file`, `list_builds`,
+  `get_build`, and `aql_search` (powerful AQL queries — read-only `find` only;
+  uses POST for the query body, with an enforced `.limit()` for large instances).
+- **`jfrog-fetch`** skill driving the new tools for artifact/dependency and
+  build-info lookups.
+- Squid allowlist entry `squid/allowlist.d/40-jfrog.conf` for the Artifactory
+  host (HTTPS/443).
+- Read-only **Confluence MCP server** (`opencode/mcp-servers/confluence/`),
+  vendored into the image and auto-enabled when `CONFLUENCE_BASE_URL` +
+  `CONFLUENCE_PAT` are present in `.env` (force off with
+  `DISABLE_CONFLUENCE_MCP=1`). API-only, following the Jira recipe: a two-value
+  pair with the PAT presented as a Bearer token, appending `/rest/api` to the
+  base URL. Tools: `get_page` (by id or space+title), `search` (CQL),
+  `get_page_children`, `list_spaces`, `get_current_user`.
+- **`confluence-fetch`** skill driving the new tools for wiki/documentation
+  lookups (read a page, CQL search, browse a space's tree).
+- Squid allowlist entry `squid/allowlist.d/50-confluence.conf` for the
+  Confluence host, plus port **8090** added to `Safe_ports` and `SSL_ports` in
+  `squid/squid.conf` (Confluence's default HTTP connector).
+
+### Fixed
+- **Plain-HTTP MCP targets on port 80** (e.g. JFrog/Bitbucket served over
+  `http://…:80`) failed with a denied `CONNECT` (403). The MCP HTTP client
+  (undici `ProxyAgent`) tunnels via `CONNECT` for every request — even plain
+  HTTP — and squid only allows `CONNECT` to `SSL_ports`. Added `80` to
+  `SSL_ports` in `squid/squid.conf` and documented that **every MCP target port
+  must be in `SSL_ports`, not just `Safe_ports`** (with the `curl`-works-but-MCP-
+  fails signature and the `--proxytunnel` repro) in `docs/MCP_SERVERS.md`.
+
+### Changed
+- `.env.example` gains a JFrog block and `DISABLE_JFROG_MCP`, plus a Confluence
+  block and `DISABLE_CONFLUENCE_MCP`.
+- `scripts/doctor.sh` now also verifies the GitLab, JFrog, and Confluence MCP
+  wiring (GitLab was previously not checked).
+- Docs (`README.md`, `docs/MCP_SERVERS.md`, `opencode/bundle/AGENTS.md`) updated
+  to cover five MCP servers.
+- `OPENCODE_VERSION` bumped `1.17.3` → `1.17.11` (build arg in
+  `opencode/Dockerfile`, default in `docker-compose.yml`, and `.env.example`).
+  Tested with the baked plugins before release.
 
 ## [0.0.5] — 2026-06-18
 
