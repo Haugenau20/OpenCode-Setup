@@ -29,6 +29,8 @@ up. The vocabulary:
 
 ## [Unreleased]
 
+## [0.0.6] — 2026-06-26
+
 **Action required:** re-pull image + rebuild squid + edit .env (new MCP credentials)
 
 ### Added
@@ -74,6 +76,9 @@ up. The vocabulary:
   wiring (GitLab was previously not checked).
 - Docs (`README.md`, `docs/MCP_SERVERS.md`, `opencode/bundle/AGENTS.md`) updated
   to cover five MCP servers.
+- `OPENCODE_VERSION` bumped `1.17.3` → `1.17.11` (build arg in
+  `opencode/Dockerfile`, default in `docker-compose.yml`, and `.env.example`).
+  Tested with the baked plugins before release.
 
 ## [0.0.5] — 2026-06-18
 

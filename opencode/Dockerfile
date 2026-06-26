@@ -3,7 +3,7 @@
 # ---- Base: OS + tools + corp CA ----------------------------------------------
 FROM debian:bookworm-slim AS base
 
-ARG OPENCODE_VERSION=1.17.3
+ARG OPENCODE_VERSION=1.17.11
 ARG NODE_MAJOR=20
 ARG TZ=Europe/Copenhagen
 
