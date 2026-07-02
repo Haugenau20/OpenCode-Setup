@@ -1,0 +1,61 @@
+# Demo onboarding pack (user-layer)
+
+An interactive onboarding/demo experience for the OpenCode workplace, shipped as
+a **user layer** so it loads on top of the stock image — **no image rebuild**.
+
+- `user-layer/agents/guide.md` — a `mode: primary` host agent (Tab-selectable).
+- `user-layer/commands/tour.md` — `/tour`, the projector-driven walkthrough.
+- `user-layer/commands/try-it.md` — `/try-it`, the self-paced take-home.
+- `DEMO-RUNSHEET.md` — the presenter run-sheet (pre-flight, `.env`, run of show).
+
+> These are flat markdown (1 agent + 2 commands, no skill directories), so they
+> slot straight into a user layer and load alongside the baked-in bundle. The
+> names don't collide with any bundled item, so they're purely additive.
+
+## Where this is meant to live
+
+This folder is staged in the backbone repo only so the files are reachable. The
+intended home is the **launcher** repo (`Opencode-Launcher`), where a developer
+can point `USER_LAYER_PATH` at it without touching the image.
+
+## Wiring it into the launcher
+
+1. Copy `demo/user-layer/` into your launcher checkout as a **tracked** dir
+   (the launcher's default `./user-layer` is gitignored — use e.g.
+   `demo/user-layer/` there too, or any tracked path):
+
+   ```
+   <launcher>/demo/user-layer/agents/guide.md
+   <launcher>/demo/user-layer/commands/tour.md
+   <launcher>/demo/user-layer/commands/try-it.md
+   ```
+
+2. Set one line in the launcher `.env`:
+
+   ```dotenv
+   USER_LAYER_PATH=./demo/user-layer
+   ```
+
+3. `./start.sh <repo>` — the launcher bind-mounts that dir at
+   `/home/dev/.config/opencode`, and `guide` / `/tour` / `/try-it` load on top of
+   the stock image. Iterate by editing the files on the host and re-running.
+
+## How it loads (mechanics)
+
+The backbone entrypoint symlinks the baked-in bundle into
+`~/.config/opencode/{agents,skills,commands}` at boot. When `USER_LAYER_PATH`
+bind-mounts a host dir over that same path, the two coexist: bundle items load,
+and these user-layer files load alongside them. A user-layer file with the same
+name as a bundle item would *shadow* it — these names don't, so nothing is
+overridden.
+
+> **Do not add an `AGENTS.md` to the user layer.** A real `AGENTS.md` there
+> shadows the bundle's house rules (skills-over-raw-tools, git conventions).
+> This pack deliberately ships none.
+
+## Promoting to the image later
+
+If the demo lands and you want it permanent for everyone (no opt-in), the same
+three files can move into the backbone bundle
+(`opencode/bundle/{agents,commands}/`) and ship in every image — they are
+byte-identical, so it's a straight copy.
