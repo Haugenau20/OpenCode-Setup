@@ -34,10 +34,11 @@ Do this the day before **and** 10 minutes before:
 - [ ] **`docker login <registry-host>`** so the image pull doesn't stall on auth.
 - [ ] **Launcher main is pushed** (your JFrog/Confluence addition) and your
       launcher checkout is on it: `git -C <launcher> pull`.
-- [ ] **Drop in the user layer.** Copy this `user-layer/` folder into the
-      launcher (a tracked dir, e.g. `<launcher>/demo/user-layer/`) and set
-      `USER_LAYER_PATH=./demo/user-layer` in the launcher `.env`. That's what
-      makes `guide` / `/tour` / `/try-it` appear — **no image build needed**.
+- [ ] **Drop in the user layer.** Copy this `onboarding-layer/` folder into the
+      launcher (a tracked dir, e.g. `<launcher>/demo/onboarding-layer/` — do not
+      name it `user-layer`, which is gitignored in both repos) and set
+      `USER_LAYER_PATH=./demo/onboarding-layer` in the launcher `.env`. That's
+      what makes `guide` / `/tour` / `/try-it` appear — **no image build needed**.
 - [ ] **Use a normal released `IMAGE_TAG`** (e.g. `latest` or a pinned version).
       The demo content rides on top via the user layer, not in the image.
 - [ ] **Pick a demo repo** with a git remote and something to look at — small,
@@ -68,7 +69,7 @@ IMAGE_REGISTRY=<your.artifactory.example>/opencode-workplace
 IMAGE_TAG=latest
 
 # --- the demo content (user layer, no image rebuild) ---
-USER_LAYER_PATH=./demo/user-layer
+USER_LAYER_PATH=./demo/onboarding-layer
 
 # --- make Section 4 (live fetch) light up ---
 JIRA_BASE_URL=https://jira.internal.example

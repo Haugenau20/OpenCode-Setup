@@ -1,16 +1,22 @@
-# Demo onboarding pack (user-layer)
+# Demo onboarding pack (user layer)
 
 An interactive onboarding/demo experience for the OpenCode workplace, shipped as
 a **user layer** so it loads on top of the stock image — **no image rebuild**.
 
-- `user-layer/agents/guide.md` — a `mode: primary` host agent (Tab-selectable).
-- `user-layer/commands/tour.md` — `/tour`, the projector-driven walkthrough.
-- `user-layer/commands/try-it.md` — `/try-it`, the self-paced take-home.
+- `onboarding-layer/agents/guide.md` — a `mode: primary` host agent (Tab-selectable).
+- `onboarding-layer/commands/tour.md` — `/tour`, the projector-driven walkthrough.
+- `onboarding-layer/commands/try-it.md` — `/try-it`, the self-paced take-home.
 - `DEMO-RUNSHEET.md` — the presenter run-sheet (pre-flight, `.env`, run of show).
 
 > These are flat markdown (1 agent + 2 commands, no skill directories), so they
 > slot straight into a user layer and load alongside the baked-in bundle. The
 > names don't collide with any bundled item, so they're purely additive.
+
+> **Why the folder isn't named `user-layer`.** Both this repo and the launcher
+> gitignore `user-layer/` (unanchored — it matches at any depth, so even
+> `demo/user-layer/` would be silently untracked). Naming it `onboarding-layer/`
+> keeps it tracked. The directory name is arbitrary — `USER_LAYER_PATH` is what
+> points the launcher at it — so just avoid the ignored token.
 
 ## Where this is meant to live
 
@@ -20,20 +26,20 @@ can point `USER_LAYER_PATH` at it without touching the image.
 
 ## Wiring it into the launcher
 
-1. Copy `demo/user-layer/` into your launcher checkout as a **tracked** dir
-   (the launcher's default `./user-layer` is gitignored — use e.g.
-   `demo/user-layer/` there too, or any tracked path):
+1. Copy `onboarding-layer/` into your launcher checkout as a **tracked** dir.
+   Do **not** name it `user-layer` (gitignored in both repos); any other tracked
+   path works:
 
    ```
-   <launcher>/demo/user-layer/agents/guide.md
-   <launcher>/demo/user-layer/commands/tour.md
-   <launcher>/demo/user-layer/commands/try-it.md
+   <launcher>/demo/onboarding-layer/agents/guide.md
+   <launcher>/demo/onboarding-layer/commands/tour.md
+   <launcher>/demo/onboarding-layer/commands/try-it.md
    ```
 
 2. Set one line in the launcher `.env`:
 
    ```dotenv
-   USER_LAYER_PATH=./demo/user-layer
+   USER_LAYER_PATH=./demo/onboarding-layer
    ```
 
 3. `./start.sh <repo>` — the launcher bind-mounts that dir at
