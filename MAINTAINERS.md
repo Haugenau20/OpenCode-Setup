@@ -10,6 +10,13 @@ Pick the next version (semver, e.g. `0.0.6`) and use it everywhere below.
 ```
 VERSION=0.0.6
 
+# 0. run the local gate — bash -n/shellcheck, JSON validity, node --check on
+#    the MCP servers, and the bats suite under tests/; also runs the
+#    docker-dependent checks below (image builds, squid -k parse, the smoke
+#    test) if a Docker daemon is reachable, otherwise lists them as manual
+#    reminders. This is also what becomes the CI job once CI infra exists.
+./scripts/check.sh
+
 # 1. update CHANGELOG.md: rename [Unreleased] to [$VERSION] with today's
 #    date, fill in the "Action required" line, and commit it.
 # 2. drop the real corp CA into ca/  (it's gitignored)
