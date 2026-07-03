@@ -17,14 +17,11 @@
  *   get_file            — file contents at a given ref
  */
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-    CallToolRequestSchema,
-    ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
-import { fetch, ProxyAgent } from "undici";
+import { fetch } from "undici";
 import { z } from "zod";
+import { makeDispatcher, requireEnv, basicAuth, toolError } from "../_lib/common.js";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -36,18 +33,22 @@ import { z } from "zod";
 // unlike a var only export-ed at runtime by PID 1. The HTTP Basic credential is
 // derived here from user:pat (a single PAT serves both git and the API), so
 // nothing needs to pre-encode it.
-const BB_BASE_URL = process.env.BITBUCKET_BASE_URL?.replace(/\/$/, "");
+requireEnv(["BITBUCKET_BASE_URL", "BITBUCKET_USER", "BITBUCKET_PAT"]);
+// Bitbucket alone treats a missing proxy as fatal (preserving prior
+// behavior); the other four servers fall back to a direct connection when no
+// proxy is configured (see makeDispatcher()).
+if (!process.env.HTTPS_PROXY && !process.env.HTTP_PROXY) {
+    console.error("Missing required env vars: HTTPS_PROXY or HTTP_PROXY");
+    process.exit(1);
+}
+
+const BB_BASE_URL = process.env.BITBUCKET_BASE_URL.replace(/\/$/, "");
 const BB_USER = process.env.BITBUCKET_USER;
 const BB_PAT = process.env.BITBUCKET_PAT;
-const PROXY_URL = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
 
-if (!BB_BASE_URL) throw new Error("BITBUCKET_BASE_URL is not set");
-if (!BB_USER || !BB_PAT) throw new Error("BITBUCKET_USER / BITBUCKET_PAT is not set");
-if (!PROXY_URL) throw new Error("HTTP_PROXY / HTTPS_PROXY is not set");
+const BB_AUTH_HEADER = basicAuth(BB_USER, BB_PAT);
 
-const BB_AUTH = Buffer.from(`${BB_USER}:${BB_PAT}`).toString("base64");
-
-const proxyAgent = new ProxyAgent(PROXY_URL);
+const proxyAgent = makeDispatcher();
 
 // ---------------------------------------------------------------------------
 // HTTP helper
@@ -69,7 +70,7 @@ async function bbFetch(path, params = {}) {
     const response = await fetch(url.toString(), {
         method: "GET",
         headers: {
-            Authorization: `Basic ${BB_AUTH}`,
+            Authorization: BB_AUTH_HEADER,
             Accept: "application/json",
         },
         dispatcher: proxyAgent,
@@ -408,7 +409,7 @@ async function getPrDiff(args) {
     const response = await fetch(url.toString(), {
         method: "GET",
         headers: {
-            Authorization: `Basic ${BB_AUTH}`,
+            Authorization: BB_AUTH_HEADER,
             Accept: "application/json",
         },
         dispatcher: proxyAgent,
@@ -505,199 +506,98 @@ async function getFile(args) {
 // ---------------------------------------------------------------------------
 // MCP server setup
 // ---------------------------------------------------------------------------
+//
+// Normalized onto McpServer + server.tool(...), same as the other four
+// servers (this one used to be the odd one out on the older low-level
+// Server/ListToolsRequestSchema/CallToolRequestSchema API). Every tool's
+// name, description, effective input schema, and output text format
+// (JSON.stringify(result, null, 2) on success) are unchanged — asTool()
+// just wraps each <fn> the same way the old central CallToolRequestSchema
+// handler's switch/try/catch did.
 
-const server = new Server(
-    { name: "bitbucket", version: "1.0.0" },
-    { capabilities: { tools: {} } }
+const server = new McpServer({ name: "bitbucket", version: "1.0.0" });
+
+/** Wrap a tool implementation (args -> result) as an McpServer tool callback:
+ * JSON.stringify the success value, and format thrown errors via the shared
+ * toolError() helper (no stack — see _lib/common.js) — matching the old
+ * central switch/try/catch exactly. */
+function asTool(fn) {
+    return async (args) => {
+        try {
+            const result = await fn(args);
+            return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        } catch (err) {
+            return toolError(err);
+        }
+    };
+}
+
+server.tool(
+    "list_projects",
+    "List all Bitbucket projects accessible to the current user. " +
+        "Use this first when you don't know the project key — it returns keys and display names for all projects.",
+    ListProjectsSchema.shape,
+    asTool(listProjects)
 );
 
-const TOOLS = [
-    {
-        name: "list_projects",
-        description:
-            "List all Bitbucket projects accessible to the current user. " +
-            "Use this first when you don't know the project key — it returns keys and display names for all projects.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                limit: { type: "number", description: "Max projects to return (default 50)" },
-            },
-            required: [],
-        },
-    },
-    {
-        name: "list_repos",
-        description:
-            "List all repositories in a Bitbucket project. " +
-            "Use this to find the correct repo slug before calling get_commits, get_pull_requests, or get_file.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                projectKey: { type: "string", description: "Bitbucket project key (e.g. PROJ)" },
-                limit: { type: "number", description: "Max repos to return (default 50)" },
-            },
-            required: ["projectKey"],
-        },
-    },
-    {
-        name: "get_commits",
-        description:
-            "Fetch recent commits for a Bitbucket repository. " +
-            "Optionally filter by branch and/or a search string in the commit message (e.g. a Jira ticket key). " +
-            "Useful for finding when a change was made or which commit introduced an issue.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                projectKey: { type: "string", description: "Bitbucket project key (e.g. PROJ)" },
-                repoSlug: { type: "string", description: "Repository slug (e.g. my-service)" },
-                branch: { type: "string", description: "Branch or ref to list commits from (default: default branch)" },
-                query: { type: "string", description: "Filter commits whose message contains this string (e.g. a Jira ticket key like PROJ-123)" },
-                limit: { type: "number", description: "Max commits to return (default 30, max 100)" },
-            },
-            required: ["projectKey", "repoSlug"],
-        },
-    },
-    {
-        name: "get_pull_requests",
-        description:
-            "List pull requests for a Bitbucket repository. " +
-            "Returns title, author, status, reviewers, and description. " +
-            "Use state=MERGED to find which PR delivered a feature.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                projectKey: { type: "string", description: "Bitbucket project key" },
-                repoSlug: { type: "string", description: "Repository slug" },
-                state: {
-                    type: "string",
-                    enum: ["OPEN", "MERGED", "DECLINED", "ALL"],
-                    description: "PR state filter (default OPEN)",
-                },
-                limit: { type: "number", description: "Max PRs to return (default 20, max 50)" },
-            },
-            required: ["projectKey", "repoSlug"],
-        },
-    },
-    {
-        name: "get_pull_request",
-        description:
-            "Fetch a single pull request by ID, including review comments. " +
-            "Use this after get_pull_requests to deep-dive into a specific PR.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                projectKey: { type: "string", description: "Bitbucket project key" },
-                repoSlug: { type: "string", description: "Repository slug" },
-                prId: { type: "number", description: "Pull request ID" },
-            },
-            required: ["projectKey", "repoSlug", "prId"],
-        },
-    },
-    {
-        name: "get_pr_changes",
-        description:
-            "List all files changed in a pull request, with change type (ADD, MODIFY, DELETE, RENAME). " +
-            "Use this before get_pr_diff to understand the scope of a PR before fetching the full patch.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                projectKey: { type: "string", description: "Bitbucket project key" },
-                repoSlug: { type: "string", description: "Repository slug" },
-                prId: { type: "number", description: "Pull request ID" },
-            },
-            required: ["projectKey", "repoSlug", "prId"],
-        },
-    },
-    {
-        name: "get_pr_diff",
-        description:
-            "Fetch the full unified diff of a pull request. " +
-            "Shows exactly what lines were added and removed across all changed files. " +
-            "Use get_pr_changes first to check scope — large PRs produce large diffs.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                projectKey: { type: "string", description: "Bitbucket project key" },
-                repoSlug: { type: "string", description: "Repository slug" },
-                prId: { type: "number", description: "Pull request ID" },
-                contextLines: {
-                    type: "number",
-                    description: "Lines of context around each change (default 5)",
-                },
-            },
-            required: ["projectKey", "repoSlug", "prId"],
-        },
-    },
-    {
-        name: "get_file",
-        description:
-            "Fetch the contents of a file in a Bitbucket repository at a given branch, tag, or commit ref. " +
-            "Use this to read source code for context when investigating a bug or understanding an implementation.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                projectKey: { type: "string", description: "Bitbucket project key" },
-                repoSlug: { type: "string", description: "Repository slug" },
-                filePath: {
-                    type: "string",
-                    description: "Path to the file within the repo (e.g. src/main/java/App.java)",
-                },
-                ref: {
-                    type: "string",
-                    description: "Branch, tag, or commit hash (default: default branch)",
-                },
-            },
-            required: ["projectKey", "repoSlug", "filePath"],
-        },
-    },
-];
+server.tool(
+    "list_repos",
+    "List all repositories in a Bitbucket project. " +
+        "Use this to find the correct repo slug before calling get_commits, get_pull_requests, or get_file.",
+    ListReposSchema.shape,
+    asTool(listRepos)
+);
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+server.tool(
+    "get_commits",
+    "Fetch recent commits for a Bitbucket repository. " +
+        "Optionally filter by branch and/or a search string in the commit message (e.g. a Jira ticket key). " +
+        "Useful for finding when a change was made or which commit introduced an issue.",
+    GetCommitsSchema.shape,
+    asTool(getCommits)
+);
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
+server.tool(
+    "get_pull_requests",
+    "List pull requests for a Bitbucket repository. " +
+        "Returns title, author, status, reviewers, and description. " +
+        "Use state=MERGED to find which PR delivered a feature.",
+    GetPullRequestsSchema.shape,
+    asTool(getPullRequests)
+);
 
-    try {
-        let result;
-        switch (name) {
-            case "list_projects":
-                result = await listProjects(args);
-                break;
-            case "list_repos":
-                result = await listRepos(args);
-                break;
-            case "get_commits":
-                result = await getCommits(args);
-                break;
-            case "get_pull_requests":
-                result = await getPullRequests(args);
-                break;
-            case "get_pull_request":
-                result = await getPullRequest(args);
-                break;
-            case "get_pr_changes":
-                result = await getPrChanges(args);
-                break;
-            case "get_pr_diff":
-                result = await getPrDiff(args);
-                break;
-            case "get_file":
-                result = await getFile(args);
-                break;
-            default:
-                throw new Error(`Unknown tool: ${name}`);
-        }
+server.tool(
+    "get_pull_request",
+    "Fetch a single pull request by ID, including review comments. " +
+        "Use this after get_pull_requests to deep-dive into a specific PR.",
+    GetPullRequestSchema.shape,
+    asTool(getPullRequest)
+);
 
-        return {
-            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        };
-    } catch (err) {
-        return {
-            content: [{ type: "text", text: `Error: ${err.message}` }],
-            isError: true,
-        };
-    }
-});
+server.tool(
+    "get_pr_changes",
+    "List all files changed in a pull request, with change type (ADD, MODIFY, DELETE, RENAME). " +
+        "Use this before get_pr_diff to understand the scope of a PR before fetching the full patch.",
+    GetPrChangesSchema.shape,
+    asTool(getPrChanges)
+);
+
+server.tool(
+    "get_pr_diff",
+    "Fetch the full unified diff of a pull request. " +
+        "Shows exactly what lines were added and removed across all changed files. " +
+        "Use get_pr_changes first to check scope — large PRs produce large diffs.",
+    GetPrDiffSchema.shape,
+    asTool(getPrDiff)
+);
+
+server.tool(
+    "get_file",
+    "Fetch the contents of a file in a Bitbucket repository at a given branch, tag, or commit ref. " +
+        "Use this to read source code for context when investigating a bug or understanding an implementation.",
+    GetFileSchema.shape,
+    asTool(getFile)
+);
 
 // ---------------------------------------------------------------------------
 // Start

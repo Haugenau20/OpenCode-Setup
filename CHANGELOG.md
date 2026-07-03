@@ -84,6 +84,29 @@ up. The vocabulary:
   entries, and every log/check line's wording) is unchanged — verified by
   diffing the old and new jq filter output byte-for-byte across ~19 env
   scenarios (all on/off/disabled/partial-credential combinations).
+- **New shared MCP helper lib** (`opencode/mcp-servers/_lib/common.js`) for
+  the plumbing all five first-party MCP servers re-implemented separately:
+  the undici `ProxyAgent` dispatcher, env validation, auth-header
+  construction (Bearer/Basic/PRIVATE-TOKEN), a `jsonGet` fetch helper, and
+  MCP tool-error formatting. `_lib` carries its own `package.json` (depends
+  on `undici`) since ESM resolution walks up from the importing file, not
+  its caller. All five servers migrated onto it without changing tool
+  names, descriptions, input schemas, or output text formatting.
+- **Bitbucket's MCP server normalized onto `McpServer` + `server.tool(...)`**
+  (`opencode/mcp-servers/bitbucket/index.js`), matching the other four —
+  it was the one server still on the older low-level `Server`/
+  `ListToolsRequestSchema`/`CallToolRequestSchema` API. Every tool's name,
+  description, input schema, and output format (`JSON.stringify(result,
+  null, 2)`) is unchanged; verified by sending an MCP `initialize` +
+  `tools/list` handshake to the running server and diffing the returned
+  tool names/descriptions/schemas against the source.
+- **MCP tool errors no longer include `err.stack`.** Every tool error
+  response across all five servers now goes through the shared
+  `toolError()` helper — message (and cause, where a tool already surfaced
+  it) only. A raw Node stack trace in a tool result was pure token noise
+  for the model and never explained *why* a request failed. Verified with
+  a scratch server run that forces a fetch failure (bad hostname) and
+  inspects the returned tool-error text.
 - **Squid now logs denied requests** (unlisted destination, disallowed
   `CONNECT` port, unsafe port) to `docker compose logs squid`. Allowed
   traffic — including all LLM/conversation data — is still never logged, so

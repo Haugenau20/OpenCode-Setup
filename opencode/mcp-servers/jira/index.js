@@ -1,44 +1,35 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { ProxyAgent, fetch as undiciFetch } from "undici";
 import { z } from "zod";
+import { makeDispatcher, requireEnv, bearerAuth, jsonGet, toolError } from "../_lib/common.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
 // Canonical .env names, passed through by docker compose env_file and inherited
 // by whatever process spawns this server. Jira Data Center authenticates the
 // PAT as a Bearer token (verified) — not Basic — so no username is needed.
+requireEnv(["JIRA_BASE_URL", "JIRA_PAT"]);
 const JIRA_BASE_URL = process.env.JIRA_BASE_URL;
 const JIRA_PAT      = process.env.JIRA_PAT;
 
-if (!JIRA_BASE_URL || !JIRA_PAT) {
-    console.error("Missing required env vars: JIRA_BASE_URL and/or JIRA_PAT");
-    process.exit(1);
-}
-
-const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
 // TLS is verified against the corp CA (NODE_EXTRA_CA_CERTS, set in policy.yaml).
 // Do NOT re-add rejectUnauthorized:false — a locked-down image must not skip
 // certificate verification. If a TLS Jira fails here, the CA isn't in the baked
 // bundle; fix the CA, don't disable the check.
-const dispatcher = proxyUrl ? new ProxyAgent({ uri: proxyUrl }) : undefined;
+const dispatcher = makeDispatcher();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function jiraHeaders() {
     return {
-        "Authorization": `Bearer ${JIRA_PAT}`,
+        "Authorization": bearerAuth(JIRA_PAT),
         "Content-Type": "application/json",
         "Accept": "application/json"
     };
 }
 
 async function jiraGet(path) {
-    const res = await undiciFetch(`${JIRA_BASE_URL}/rest/api/2${path}`, {
-        headers: jiraHeaders(),
-        dispatcher
-    });
-    return { status: res.status, ok: res.ok, data: res.ok ? await res.json() : null };
+    return jsonGet(`${JIRA_BASE_URL}/rest/api/2${path}`, jiraHeaders(), dispatcher);
 }
 
 function formatDate(isoString) {
@@ -185,9 +176,7 @@ server.tool(
             };
 
         } catch (err) {
-            return {
-                content: [{ type: "text", text: `MCP error: ${err.message}\nCause: ${err.cause}\n${err.stack}` }]
-            };
+            return toolError(err, { prefix: "MCP error", includeCause: true });
         }
     }
 );
@@ -226,9 +215,7 @@ server.tool(
             };
 
         } catch (err) {
-            return {
-                content: [{ type: "text", text: `MCP error: ${err.message}\nCause: ${err.cause}\n${err.stack}` }]
-            };
+            return toolError(err, { prefix: "MCP error", includeCause: true });
         }
     }
 );
@@ -252,9 +239,7 @@ server.tool(
             };
 
         } catch (err) {
-            return {
-                content: [{ type: "text", text: `MCP error: ${err.message}\nCause: ${err.cause}` }]
-            };
+            return toolError(err, { prefix: "MCP error", includeCause: true });
         }
     }
 );

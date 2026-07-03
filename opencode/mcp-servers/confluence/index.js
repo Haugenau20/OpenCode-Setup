@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { ProxyAgent, fetch as undiciFetch } from "undici";
 import { z } from "zod";
+import { makeDispatcher, requireEnv, bearerAuth, jsonGet, toolError } from "../_lib/common.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -10,37 +10,28 @@ import { z } from "zod";
 // the PAT as a Bearer token (same as Jira DC) — not Basic — so no username is
 // needed. CONFLUENCE_BASE_URL must include the port if Confluence is served on
 // its default 8090 connector (e.g. http://confluence.internal.example:8090).
+requireEnv(["CONFLUENCE_BASE_URL", "CONFLUENCE_PAT"]);
 const CONFLUENCE_BASE_URL = process.env.CONFLUENCE_BASE_URL;
 const CONFLUENCE_PAT      = process.env.CONFLUENCE_PAT;
 
-if (!CONFLUENCE_BASE_URL || !CONFLUENCE_PAT) {
-    console.error("Missing required env vars: CONFLUENCE_BASE_URL and/or CONFLUENCE_PAT");
-    process.exit(1);
-}
-
-const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
 // TLS is verified against the corp CA (NODE_EXTRA_CA_CERTS, set in policy.yaml).
 // Do NOT re-add rejectUnauthorized:false — a locked-down image must not skip
 // certificate verification. If a TLS Confluence fails here, the CA isn't in the
 // baked bundle; fix the CA, don't disable the check.
-const dispatcher = proxyUrl ? new ProxyAgent({ uri: proxyUrl }) : undefined;
+const dispatcher = makeDispatcher();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function confluenceHeaders() {
     return {
-        "Authorization": `Bearer ${CONFLUENCE_PAT}`,
+        "Authorization": bearerAuth(CONFLUENCE_PAT),
         "Content-Type": "application/json",
         "Accept": "application/json"
     };
 }
 
 async function confluenceGet(path) {
-    const res = await undiciFetch(`${CONFLUENCE_BASE_URL}/rest/api${path}`, {
-        headers: confluenceHeaders(),
-        dispatcher
-    });
-    return { status: res.status, ok: res.ok, data: res.ok ? await res.json() : null };
+    return jsonGet(`${CONFLUENCE_BASE_URL}/rest/api${path}`, confluenceHeaders(), dispatcher);
 }
 
 function formatDate(isoString) {
@@ -211,7 +202,7 @@ server.tool(
             return { content: [{ type: "text", text: formatPage(content) }] };
 
         } catch (err) {
-            return { content: [{ type: "text", text: `MCP error: ${err.message}\nCause: ${err.cause}\n${err.stack}` }] };
+            return toolError(err, { prefix: "MCP error", includeCause: true });
         }
     }
 );
@@ -248,7 +239,7 @@ server.tool(
             return { content: [{ type: "text", text: formatSearchResults(data.results ?? [], cql, data.totalSize ?? data.size ?? 0) }] };
 
         } catch (err) {
-            return { content: [{ type: "text", text: `MCP error: ${err.message}\nCause: ${err.cause}\n${err.stack}` }] };
+            return toolError(err, { prefix: "MCP error", includeCause: true });
         }
     }
 );
@@ -276,7 +267,7 @@ server.tool(
             return { content: [{ type: "text", text: formatChildren(data.results ?? [], id) }] };
 
         } catch (err) {
-            return { content: [{ type: "text", text: `MCP error: ${err.message}\nCause: ${err.cause}` }] };
+            return toolError(err, { prefix: "MCP error", includeCause: true });
         }
     }
 );
@@ -298,7 +289,7 @@ server.tool(
             return { content: [{ type: "text", text: formatSpaces(data.results ?? []) }] };
 
         } catch (err) {
-            return { content: [{ type: "text", text: `MCP error: ${err.message}\nCause: ${err.cause}` }] };
+            return toolError(err, { prefix: "MCP error", includeCause: true });
         }
     }
 );
@@ -320,7 +311,7 @@ server.tool(
             return { content: [{ type: "text", text: `Current Confluence user: ${data.displayName} (username: ${data.username ?? data.name}, email: ${data.email ?? "—"})` }] };
 
         } catch (err) {
-            return { content: [{ type: "text", text: `MCP error: ${err.message}\nCause: ${err.cause}` }] };
+            return toolError(err, { prefix: "MCP error", includeCause: true });
         }
     }
 );

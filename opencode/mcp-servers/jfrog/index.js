@@ -29,8 +29,9 @@ import {
     CallToolRequestSchema,
     ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { fetch, ProxyAgent } from "undici";
+import { fetch } from "undici";
 import { z } from "zod";
+import { makeDispatcher, requireEnv, bearerAuth, toolError } from "../_lib/common.js";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -42,18 +43,15 @@ import { z } from "zod";
 // unlike a var only export-ed at runtime by PID 1. JFrog has no git transport,
 // so there is no JFROG_USER: the access token is presented as a Bearer token,
 // the same shape as Jira.
+requireEnv(["JFROG_BASE_URL", "JFROG_PAT"]);
 const JFROG_BASE_URL = process.env.JFROG_BASE_URL?.replace(/\/$/, "");
 const JFROG_PAT = process.env.JFROG_PAT;
-const PROXY_URL = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
-
-if (!JFROG_BASE_URL) throw new Error("JFROG_BASE_URL is not set");
-if (!JFROG_PAT) throw new Error("JFROG_PAT is not set");
 
 // TLS is verified against the corp CA (NODE_EXTRA_CA_CERTS, set in policy.yaml).
 // Do NOT re-add rejectUnauthorized:false — a locked-down image must not skip
 // certificate verification. If TLS to JFrog fails here, the CA isn't in the
 // baked bundle; fix the CA, don't disable the check.
-const proxyAgent = PROXY_URL ? new ProxyAgent(PROXY_URL) : undefined;
+const proxyAgent = makeDispatcher();
 
 // ---------------------------------------------------------------------------
 // HTTP helpers
@@ -61,7 +59,7 @@ const proxyAgent = PROXY_URL ? new ProxyAgent(PROXY_URL) : undefined;
 
 function jfHeaders(accept = "application/json") {
     return {
-        Authorization: `Bearer ${JFROG_PAT}`,
+        Authorization: bearerAuth(JFROG_PAT),
         Accept: accept,
     };
 }
@@ -129,7 +127,7 @@ async function jfPostAql(query) {
     const response = await fetch(url, {
         method: "POST",
         headers: {
-            Authorization: `Bearer ${JFROG_PAT}`,
+            Authorization: bearerAuth(JFROG_PAT),
             Accept: "application/json",
             "Content-Type": "text/plain",
         },
@@ -702,10 +700,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         };
     } catch (err) {
-        return {
-            content: [{ type: "text", text: `Error: ${err.message}` }],
-            isError: true,
-        };
+        return toolError(err);
     }
 });
 
