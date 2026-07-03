@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         bash git vim less jq ripgrep fd-find \
         build-essential python3 python3-pip python3-venv \
         openssh-client iproute2 dnsutils \
-        sudo gosu \
+        gosu \
     && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
     && ln -sf /usr/share/zoneinfo/${TZ} /etc/localtime \
     && echo "${TZ}" > /etc/timezone \
@@ -147,12 +147,12 @@ COPY opencode/git-guard /usr/local/bin/git-guard
 RUN chmod +x /usr/local/bin/git-guard \
     && ln -sf /usr/local/bin/git-guard /usr/local/bin/git
 
-# Non-root user. UID/GID get remapped at start to match the host.
+# Non-root user. UID/GID get remapped at start to match the host — that remap
+# runs in the entrypoint AS ROOT (before gosu drops to dev), so dev needs no
+# sudo of its own. Granting it would only widen the blast radius (e.g. `sudo
+# chown -R 0:0 /workspace` against the host bind mount).
 RUN groupadd --gid 1000 dev \
-    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash dev \
-    && echo 'dev ALL=(ALL) NOPASSWD: /usr/sbin/usermod, /usr/sbin/groupmod, /usr/bin/chown' \
-         > /etc/sudoers.d/dev-uid-remap \
-    && chmod 0440 /etc/sudoers.d/dev-uid-remap
+    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash dev
 
 COPY opencode/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
