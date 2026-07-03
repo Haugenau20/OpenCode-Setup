@@ -93,13 +93,14 @@ up. The vocabulary:
   its caller. All five servers migrated onto it without changing tool
   names, descriptions, input schemas, or output text formatting.
 - **Bitbucket's MCP server normalized onto `McpServer` + `server.tool(...)`**
-  (`opencode/mcp-servers/bitbucket/index.js`), matching the other four —
-  it was the one server still on the older low-level `Server`/
-  `ListToolsRequestSchema`/`CallToolRequestSchema` API. Every tool's name,
-  description, input schema, and output format (`JSON.stringify(result,
-  null, 2)`) is unchanged; verified by sending an MCP `initialize` +
-  `tools/list` handshake to the running server and diffing the returned
-  tool names/descriptions/schemas against the source.
+  (`opencode/mcp-servers/bitbucket/index.js`), matching Jira/Confluence.
+  (GitLab and JFrog also still use the older low-level `Server`/
+  `ListToolsRequestSchema`/`CallToolRequestSchema` API — only Bitbucket's
+  normalization was in scope this pass.) Every tool's name, description,
+  input schema, and output format (`JSON.stringify(result, null, 2)`) is
+  unchanged; verified by sending an MCP `initialize` + `tools/list`
+  handshake to the running server and diffing the returned tool
+  names/descriptions/schemas against the source.
 - **MCP tool errors no longer include `err.stack`.** Every tool error
   response across all five servers now goes through the shared
   `toolError()` helper — message (and cause, where a tool already surfaced
