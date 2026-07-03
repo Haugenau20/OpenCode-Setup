@@ -4,18 +4,71 @@ set -euo pipefail
 log() { printf '[entrypoint] %s\n' "$*" >&2; }
 die() { log "FATAL: $*"; exit 1; }
 
-# Read disabled.yaml into bash arrays (simple grep — no yaml parser needed
+# Read disabled.yaml into bash arrays (simple awk — no yaml parser needed
 # for a flat list-of-lists schema). Falls back to empty arrays.
+#
+# Supports every form documented in docs/ADDING_SKILLS.md, mixed freely per
+# kind within the same file:
+#   kind:                upright multiline list
+#     - a
+#     - b
+#   kind: [a, b]          same-line inline array (with or without a space
+#   kind:  [a,b]           before the bracket, with or without spaces after commas)
+#   kind: []               same-line inline empty array — yields nothing AND
+#                           does not leak into the next kind
+#   kind:                 array bracket on its own line right after the key
+#     [a, b]
+#   (kind absent from the file) — yields nothing
+#
+# One "key:" line (any word immediately followed by a colon, at any indent)
+# both opens the section for a matching kind and closes the section for
+# whichever kind was previously open — that single rule is what makes
+# same-line-empty kinds not leak into whatever list-form kind follows them,
+# and what makes a multi-item dash list keep printing entries instead of
+# bailing out after the first one.
 disabled_for() {
     local kind="$1"
     [ -f "${DISABLED_FILE}" ] || return 0
     awk -v k="${kind}" '
-        $0 ~ "^[[:space:]]*"k":" {found=1; next}
-        found && /^[[:space:]]*\[/ {
-            gsub(/[][]/, ""); gsub(/,/, " "); print; exit
+        function items(s,    v) {
+            v = s
+            gsub(/[][]/, "", v)
+            gsub(/,/, " ", v)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+            return v
         }
-        found && /^[[:space:]]*-/ {sub(/^[[:space:]]*-[[:space:]]*/, ""); print}
-        found && /^[a-zA-Z]/ {exit}
+        # A key line: optional leading whitespace, a bare word, a colon, and
+        # optionally an inline value after it. Dash items ("- foo") and
+        # standalone bracket lines ("[a, b]") never match this — they start
+        # with "-"/"[", not a word character.
+        /^[[:space:]]*[A-Za-z_][A-Za-z0-9_-]*:/ {
+            key = $0
+            sub(/^[[:space:]]*/, "", key)
+            sub(/:.*$/, "", key)
+            rest = $0
+            sub(/^[[:space:]]*[A-Za-z_][A-Za-z0-9_-]*:[[:space:]]*/, "", rest)
+
+            found = (key == k) ? 1 : 0
+            if (found && rest != "") {
+                if (rest ~ /^\[/) {
+                    v = items(rest)
+                    if (v != "") print v
+                }
+                found = 0   # same-line value fully answers this key
+            }
+            next
+        }
+        found && /^[[:space:]]*\[/ {
+            v = items($0)
+            if (v != "") print v
+            found = 0
+            next
+        }
+        found && /^[[:space:]]*-/ {
+            sub(/^[[:space:]]*-[[:space:]]*/, "")
+            print
+            next
+        }
     ' "${DISABLED_FILE}"
 }
 

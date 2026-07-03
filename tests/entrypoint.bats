@@ -113,14 +113,10 @@ SRC='source "$ENTRYPOINT"'
   [ -z "$output" ]
 }
 
-@test "disabled_for: multi-line dash list — KNOWN LIMITATION: only the FIRST item is returned" {
-  # sub() in the awk program rewrites $0 in place when stripping the leading
-  # "- ", and the very next pattern (found && /^[a-zA-Z]/) is then evaluated
-  # against that REWRITTEN $0 — which now starts with a bare word — so it
-  # matches and exits after the first dash line. A disabled.yaml with more
-  # than one entry under a kind silently only disables the first. This test
-  # pins the actual current behavior (not the "obviously intended" one) so a
-  # future fix is a deliberate, visible test change rather than a surprise.
+@test "disabled_for: multi-line dash list — every item is returned, not just the first" {
+  # Each dash line is printed and the scan moves on to the next line instead
+  # of bailing out after the first — a multi-entry list under a kind disables
+  # all of them, not just the first.
   local f="$BATS_TEST_TMPDIR/dis.yaml"
   printf '%s\n' \
     'disabled:' \
@@ -133,18 +129,15 @@ SRC='source "$ENTRYPOINT"'
     > "$f"
   run bash -c 'DISABLED_FILE="'"$f"'"; '"$SRC"'; disabled_for agents'
   [ "$status" -eq 0 ]
-  [ "$output" = "code-reviewer" ]
+  [ "$output" = "$(printf 'code-reviewer\nsecurity-review')" ]
 }
 
-@test "disabled_for: KNOWN LIMITATION — the docs/ADDING_SKILLS.md documented same-line inline-array form disables nothing" {
-  # docs/ADDING_SKILLS.md tells developers to write:
+@test "disabled_for: the docs/ADDING_SKILLS.md documented same-line inline-array form is honored" {
+  # docs/ADDING_SKILLS.md documents:
   #   agents:  [code-reviewer]
-  # But the awk key-match pattern ("^[[:space:]]*agents:") matches the WHOLE
-  # line (key AND its same-line value) and immediately does `next`, so the
-  # "[code-reviewer]" content is discarded without ever being inspected. The
-  # only inline-array form the parser actually honors is the array bracket on
-  # its OWN line after the key. This is a real gap between the docs and the
-  # implementation — flagged here rather than silently pinned as "working".
+  # The key-match rule now inspects whatever follows the colon on the SAME
+  # line before moving on, so a same-line inline array is parsed instead of
+  # silently discarded.
   local f="$BATS_TEST_TMPDIR/dis.yaml"
   printf '%s\n' \
     'disabled:' \
@@ -155,10 +148,45 @@ SRC='source "$ENTRYPOINT"'
     > "$f"
   run bash -c 'DISABLED_FILE="'"$f"'"; '"$SRC"'; disabled_for agents'
   [ "$status" -eq 0 ]
-  [ -z "$output" ]   # documented example silently fails to disable anything
+  [ "$output" = "code-reviewer" ]
 }
 
-@test "disabled_for: an array on its OWN line after the key (the form the parser actually supports) IS honored" {
+@test "disabled_for: same-line inline array with multiple items and no space after commas" {
+  local f="$BATS_TEST_TMPDIR/dis.yaml"
+  printf '%s\n' \
+    'disabled:' \
+    '  agents: [code-reviewer,security-review]' \
+    > "$f"
+  run bash -c 'DISABLED_FILE="'"$f"'"; '"$SRC"'; disabled_for agents'
+  [ "$status" -eq 0 ]
+  padded=" $(printf '%s' "$output" | tr -s '[:space:]' ' ') "
+  [[ "$padded" == *" code-reviewer "* ]]
+  [[ "$padded" == *" security-review "* ]]
+}
+
+@test "disabled_for: same-line inline array immediately follows the colon (no space before the bracket)" {
+  local f="$BATS_TEST_TMPDIR/dis.yaml"
+  printf '%s\n' \
+    'disabled:' \
+    '  agents:[code-reviewer]' \
+    > "$f"
+  run bash -c 'DISABLED_FILE="'"$f"'"; '"$SRC"'; disabled_for agents'
+  [ "$status" -eq 0 ]
+  [ "$output" = "code-reviewer" ]
+}
+
+@test "disabled_for: same-line inline empty array yields nothing for that kind" {
+  local f="$BATS_TEST_TMPDIR/dis.yaml"
+  printf '%s\n' \
+    'disabled:' \
+    '  agents: []' \
+    > "$f"
+  run bash -c 'DISABLED_FILE="'"$f"'"; '"$SRC"'; disabled_for agents'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "disabled_for: an array on its OWN line after the key (one of several supported inline-array forms) IS honored" {
   local f="$BATS_TEST_TMPDIR/dis.yaml"
   printf '%s\n' \
     'disabled:' \
@@ -179,7 +207,7 @@ SRC='source "$ENTRYPOINT"'
   [[ "$padded" == *" security-review "* ]]
 }
 
-@test "disabled_for: other-kind isolation holds for the realistic shipped shape (kind not followed by a list-form kind)" {
+@test "disabled_for: other-kind isolation holds regardless of what forms the neighboring kinds use" {
   local f="$BATS_TEST_TMPDIR/dis.yaml"
   printf '%s\n' \
     'disabled:' \
@@ -194,13 +222,12 @@ SRC='source "$ENTRYPOINT"'
   [ -z "$output" ]   # none of these leak "code-reviewer" from the agents section
 }
 
-@test "disabled_for: KNOWN LIMITATION — a same-line-empty kind NOT LAST in the file leaks the next kind's list-form items" {
-  # skills is declared "skills:  []" (same line, so the array-bracket rule
-  # never fires) and is not the last key, so the boundary-exit rule (which
-  # only fires once sub() has already mutated $0 on a dash line) never
-  # triggers either — the scan falls through into commands: and returns ITS
-  # item under a "skills" query. A genuine isolation gap, pinned here so a
-  # future fix is visible rather than silently changing behavior.
+@test "disabled_for: a same-line-empty kind NOT LAST in the file no longer leaks the next kind's list-form items" {
+  # skills is declared "skills:  []" (same line) and is not the last key.
+  # Every key line — including the next one, "commands:" — now closes
+  # whatever kind was previously open, so the empty skills section can no
+  # longer fall through into commands' list and leak "old-release-notes"
+  # back out under a "skills" query.
   local f="$BATS_TEST_TMPDIR/dis.yaml"
   printf '%s\n' \
     'disabled:' \
@@ -213,7 +240,54 @@ SRC='source "$ENTRYPOINT"'
     > "$f"
   run bash -c 'DISABLED_FILE="'"$f"'"; '"$SRC"'; disabled_for skills'
   [ "$status" -eq 0 ]
-  [ "$output" = "old-release-notes" ]   # leaked from commands:, not skills' own (empty) list
+  [ -z "$output" ]   # skills' own (empty) list — nothing from commands: leaks in
+
+  run bash -c 'DISABLED_FILE="'"$f"'"; '"$SRC"'; disabled_for commands'
+  [ "$status" -eq 0 ]
+  [ "$output" = "old-release-notes" ]   # commands' own item is still returned correctly
+}
+
+@test "disabled_for: a kind absent from the file entirely yields nothing" {
+  local f="$BATS_TEST_TMPDIR/dis.yaml"
+  printf '%s\n' \
+    'disabled:' \
+    '  agents:' \
+    '    - code-reviewer' \
+    > "$f"
+  run bash -c 'DISABLED_FILE="'"$f"'"; '"$SRC"'; disabled_for skills; disabled_for commands; disabled_for mcp'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "disabled_for: a file mixing every form, one per kind, resolves each kind correctly" {
+  local f="$BATS_TEST_TMPDIR/dis.yaml"
+  printf '%s\n' \
+    'disabled:' \
+    '  agents:' \
+    '    - code-reviewer' \
+    '    - security-review' \
+    '  skills:  [old-skill]' \
+    '  commands: []' \
+    '  mcp:' \
+    '    [bitbucket, gitlab]' \
+    > "$f"
+  run bash -c 'DISABLED_FILE="'"$f"'"; '"$SRC"'; disabled_for agents'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'code-reviewer\nsecurity-review')" ]
+
+  run bash -c 'DISABLED_FILE="'"$f"'"; '"$SRC"'; disabled_for skills'
+  [ "$status" -eq 0 ]
+  [ "$output" = "old-skill" ]
+
+  run bash -c 'DISABLED_FILE="'"$f"'"; '"$SRC"'; disabled_for commands'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  run bash -c 'DISABLED_FILE="'"$f"'"; '"$SRC"'; disabled_for mcp'
+  [ "$status" -eq 0 ]
+  padded=" $(printf '%s' "$output" | tr -s '[:space:]' ' ') "
+  [[ "$padded" == *" bitbucket "* ]]
+  [[ "$padded" == *" gitlab "* ]]
 }
 
 # --- apply_policy_env() ---------------------------------------------------
