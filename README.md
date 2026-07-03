@@ -62,8 +62,7 @@ If something doesn't work, run `./scripts/doctor.sh` first.
   developer, no network needed. Run `/plugins` to see them.
 - A git safety gate: remote operations (`push`, `fetch`, `pull`, `clone`)
   are blocked unless `ALLOW_REMOTE_GIT=1` in `.env`.
-- Per-project persistent session/conversation logs (toggle off if you don't
-  want them on disk).
+- Per-project persistent session/conversation logs.
 - Three-network docker topology so opencode has no direct route to the
   internet.
 
