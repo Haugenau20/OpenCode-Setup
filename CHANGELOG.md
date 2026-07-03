@@ -29,6 +29,50 @@ up. The vocabulary:
 
 ## [Unreleased]
 
+<!-- Action required: re-pull image + rebuild squid (docker compose build
+     squid && docker compose up -d squid). If your .env still has an
+     ENABLE_SESSION_LOGS line, it can be deleted — it is no longer read. -->
+
+### Fixed
+- **`git-guard` global-option bypass**: the guard only inspected `$1`, so
+  `git -C <path> push`, `git -c k=v fetch`, `git --git-dir=… pull`, etc. sailed
+  past it without triggering the `ALLOW_REMOTE_GIT` gate. It now scans past
+  git's global options to find the real subcommand before deciding. Also adds
+  `ls-remote` to the blocked set (purely remote, previously ungated).
+- **`policy.yaml` values kept their literal quotes** when exported by the
+  entrypoint (e.g. `OPENCODE_DISABLE_TELEMETRY` exported as the 3-character
+  string `"1"`, and a quoted `NO_PROXY` overwrote the correct unquoted one
+  compose set). The policy parser now strips one layer of surrounding quotes,
+  same as the existing LLM-credential trimming.
+- **Git credential helper matched hosts by suffix glob** (`*bitbucket.internal.example`),
+  so a lookalike host like `evil-bitbucket.internal.example` would also match
+  and receive real credentials. Matching is now exact-host.
+
+### Changed
+- **Squid now logs denied requests** (unlisted destination, disallowed
+  `CONNECT` port, unsafe port) to `docker compose logs squid`. Allowed
+  traffic — including all LLM/conversation data — is still never logged, so
+  the no-retention stance is unchanged; this only makes self-service
+  allowlist debugging possible (`docs/TROUBLESHOOTING.md` previously pointed
+  at a log line that could never exist).
+- **Removed passwordless `sudo`** for the `dev` user (`usermod`/`groupmod`/`chown`)
+  and dropped the `sudo` package from the image entirely. Nothing legitimate
+  used it — the UID remap runs in the entrypoint as root, before dropping to
+  `dev` via `gosu` — and it allowed re-owning the host workspace bind mount
+  from inside the container.
+- **`scripts/doctor.sh` treats Bitbucket credentials as optional**, matching
+  `.env.example` and the launcher: `BITBUCKET_USER`/`BITBUCKET_PAT` unset now
+  prints a warning instead of failing the check.
+
+### Removed
+- **`ENABLE_SESSION_LOGS` knob.** It never actually worked: disabling it tried
+  to mount a tmpfs over the state directory, which requires `CAP_SYS_ADMIN`
+  that compose never grants, so the mount always silently failed and session
+  logs were always persisted regardless of the setting. Removed the dead
+  code path, the `.env.example` entry, and the docs that described the
+  (non-functional) toggle. An old `.env` that still sets it is harmlessly
+  ignored.
+
 ## [0.0.6] — 2026-06-26
 
 **Action required:** re-pull image + rebuild squid + edit .env (new MCP credentials)
