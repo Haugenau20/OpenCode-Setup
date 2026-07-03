@@ -40,7 +40,7 @@ RUN update-ca-certificates
 # entrypoint reads (`<symlink-name>=<relative/entry/path>` per line). At runtime
 # OpenCode 1.16.2 auto-scans `plugin/*.{ts,js}` and imports the symlinked entry
 # files directly — no Bun install, no network. Bump a *_REF to update a plugin.
-# `base` already carries node 20, git, build-essential, and python3.
+# `base` already carries node 22, git, build-essential, and python3.
 FROM base AS plugins-build
 
 # Pin every plugin. superpowers/workspace publish no usable tags, so they pin by
@@ -104,7 +104,7 @@ RUN git clone https://github.com/kdcokenny/opencode-workspace.git workspace \
 # under opencode/mcp-servers/. The loop below globs every directory, so adding a
 # new server folder needs no change here. Install their runtime deps so nothing
 # hits npm at container start — the egress lock would block it. Deps are pure JS
-# (undici, zod, the MCP SDK); no native build. `base` already carries node 20 + npm.
+# (undici, zod, the MCP SDK); no native build. `base` already carries node 22 + npm.
 FROM base AS mcp-build
 COPY opencode/mcp-servers/ /staging/mcp-servers/
 RUN set -eu; for d in /staging/mcp-servers/*/; do \
