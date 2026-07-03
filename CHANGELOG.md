@@ -33,6 +33,22 @@ up. The vocabulary:
      squid && docker compose up -d squid). If your .env still has an
      ENABLE_SESSION_LOGS line, it can be deleted — it is no longer read. -->
 
+### Added
+- **Machine-readable image manifest** (`/etc/opencode/manifest.json`), built
+  from the checked-in `opencode/manifest.json` with `image_version`/
+  `opencode_version` injected at build time. Lists every env key the
+  container reads (with required/optional), the MCP servers it ships, and
+  the baked plugins. This is what lets the launcher's drift check notice
+  when the image grows a service the launcher doesn't know about yet
+  (previously silent — see the launcher's own changelog for the check
+  itself). Maintainers: add new env keys here in the same commit that adds
+  them to the entrypoint/an MCP server (see MAINTAINERS.md).
+- **In-image `CHANGELOG.md`** (`/etc/opencode/CHANGELOG.md`) — the running
+  container now carries its own release notes, so a consumer (or the
+  launcher, on a digest-change nudge) can print what changed without a
+  separate fetch, e.g. `docker run --rm <img> sed -n '/^## \[0.0.7\]/,/^## /p'
+  /etc/opencode/CHANGELOG.md`.
+
 ### Fixed
 - **`git-guard` global-option bypass**: the guard only inspected `$1`, so
   `git -C <path> push`, `git -c k=v fetch`, `git --git-dir=… pull`, etc. sailed
@@ -49,6 +65,17 @@ up. The vocabulary:
   and receive real credentials. Matching is now exact-host.
 
 ### Changed
+- **`NODE_MAJOR` bumped `20` → `22`** in `opencode/Dockerfile`. Node 20 reached
+  end-of-life April 2026. The MCP servers are pure undici/zod (no native
+  addons), so this is low-risk; validated with `node --check` on every
+  server file under the new major.
+- **Pinned the squid base image.** `squid/Dockerfile` built `FROM
+  ubuntu/squid:latest`, a moving target under a system whose whole philosophy
+  is deliberate pinning (cf. `OPENCODE_VERSION`). `ubuntu/squid` doesn't
+  publish plain numbered tags, only `<squid>-<ubuntu>_beta`/`_edge` channel
+  tags plus the `latest`/`edge` aliases — pinned to `ubuntu/squid:6.6-24.04_beta`
+  by digest (what `latest` resolved to at pin time). See MAINTAINERS.md for
+  the re-pin recipe.
 - **Squid now logs denied requests** (unlisted destination, disallowed
   `CONNECT` port, unsafe port) to `docker compose logs squid`. Allowed
   traffic — including all LLM/conversation data — is still never logged, so

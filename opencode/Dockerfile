@@ -4,7 +4,7 @@
 FROM debian:bookworm-slim AS base
 
 ARG OPENCODE_VERSION=1.17.11
-ARG NODE_MAJOR=20
+ARG NODE_MAJOR=22
 ARG TZ=Europe/Copenhagen
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -115,6 +115,17 @@ RUN set -eu; for d in /staging/mcp-servers/*/; do \
 # ---- Runtime: opencode + workplace bundle ------------------------------------
 FROM base AS runtime
 
+# ARG scope resets at every FROM, even one naming a prior stage — redeclare
+# both here so their values are actually available to THIS stage's RUN/LABEL
+# instructions (without this, OPENCODE_VERSION silently evaluated empty below,
+# and the OCI label MAINTAINERS.md promises never carried the real version).
+ARG OPENCODE_VERSION=1.17.11
+# IMAGE_VERSION is the opencode-workplace image's OWN release version (semver
+# tag pushed to Artifactory, e.g. 0.0.7 — see MAINTAINERS.md "Cutting a
+# release"), distinct from OPENCODE_VERSION (the upstream opencode CLI it
+# bundles). Defaults to "local" for dev builds that don't pass it explicitly.
+ARG IMAGE_VERSION=local
+
 # Install opencode globally. Version is pinned per build and recorded as an
 # OCI label so `docker inspect` shows what's inside.
 RUN npm install -g opencode-ai@${OPENCODE_VERSION} \
@@ -124,6 +135,24 @@ RUN npm install -g opencode-ai@${OPENCODE_VERSION} \
 COPY opencode/bundle/ /opt/opencode/bundle/
 COPY opencode/policy.yaml /etc/opencode/policy.yaml
 COPY opencode/opencode.json /etc/opencode/opencode.json
+
+# Machine-readable statement of what THIS image consumes (env keys it reads,
+# MCP servers it ships, plugins it bakes) — the launcher's drift check reads
+# this to notice when the image adds a service the launcher doesn't know
+# about yet. opencode/manifest.json is the maintainer-edited source of truth;
+# image_version/opencode_version are injected here from the build args so the
+# manifest always matches what actually got built, not what was last hand-
+# edited into the checked-in file.
+COPY opencode/manifest.json /etc/opencode/manifest.json.src
+RUN jq --arg v "${IMAGE_VERSION}" --arg ov "${OPENCODE_VERSION}" \
+       '.image_version = $v | .opencode_version = $ov' \
+       /etc/opencode/manifest.json.src > /etc/opencode/manifest.json \
+    && rm /etc/opencode/manifest.json.src
+
+# In-image release notes: lets a consumer (or the launcher) read what changed
+# for the exact image they pulled without a separate fetch, e.g.
+# `docker run --rm <img> sed -n '/^## \[0.0.7\]/,/^## /p' /etc/opencode/CHANGELOG.md`.
+COPY CHANGELOG.md /etc/opencode/CHANGELOG.md
 
 # Opt-in plugins, built and vendored in the plugins-build stage. The entrypoint
 # symlinks the entry files of ENABLED plugins (per disabled.yaml) into the user
@@ -164,6 +193,7 @@ RUN mkdir -p /home/dev/.config/opencode /home/dev/.local/share/opencode /workspa
 LABEL org.opencontainers.image.title="opencode-workplace" \
       org.opencontainers.image.description="Locked-down OpenCode for internal use" \
       org.opencontainers.image.source="https://bitbucket.example.com/opencode-workplace" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
       opencode.version="${OPENCODE_VERSION}"
 
 EXPOSE 4096
