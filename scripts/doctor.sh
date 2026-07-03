@@ -27,10 +27,20 @@ if [ -f .env ]; then
     ok ".env present"
     load_env ./.env
 
-    for var in LLM_API_BASE LLM_API_KEY BITBUCKET_USER BITBUCKET_PAT \
+    for var in LLM_API_BASE LLM_API_KEY \
                PROJECT_SLUG OPENCODE_PORT REPO_PATH HOST_UID HOST_GID; do
         if [ -z "${!var:-}" ]; then
             bad "${var} is empty"
+        else
+            ok "${var} set"
+        fi
+    done
+
+    # Bitbucket is optional everywhere else in this system (.env.example, the
+    # launcher) — warn rather than fail when it's unset.
+    for var in BITBUCKET_USER BITBUCKET_PAT; do
+        if [ -z "${!var:-}" ]; then
+            warn "${var} unset (optional)"
         else
             ok "${var} set"
         fi
