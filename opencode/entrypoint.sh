@@ -257,13 +257,8 @@ jq "${mcp_filter}" "${mcp_jq_args[@]}" /etc/opencode/opencode.json \
     > "${USER_CFG}/opencode.json"
 export OPENCODE_CONFIG="${USER_CFG}/opencode.json"
 
-# ---- 5. Session logs: tmpfs swap if disabled ---------------------------------
+# ---- 5. Session state ownership -----------------------------------------------
 STATE_DIR=/home/dev/.local/share/opencode
-if [ "${ENABLE_SESSION_LOGS:-1}" != "1" ]; then
-    log "session logs disabled; mounting tmpfs over ${STATE_DIR}"
-    mount -t tmpfs -o size=256m tmpfs "${STATE_DIR}" 2>/dev/null \
-        || log "tmpfs mount failed (no CAP_SYS_ADMIN?); using volume anyway"
-fi
 chown -R "${HOST_UID}:${HOST_GID}" "${STATE_DIR}" "${USER_CFG}"
 
 # ---- 6. Git credential helper: host-aware dispatch for multi-host creds ------
@@ -299,10 +294,10 @@ if { [ -n "${BITBUCKET_USER:-}" ] && [ -n "${BITBUCKET_PAT:-}" ]; } \
     # hostnames/creds into the file.
     cred_arms=""
     if [ -n "${BITBUCKET_USER:-}" ] && [ -n "${BITBUCKET_PAT:-}" ]; then
-        cred_arms="${cred_arms}*${bb_host}) echo username=${BITBUCKET_USER}; echo password=\${BITBUCKET_PAT} ;; "
+        cred_arms="${cred_arms}${bb_host}) echo username=${BITBUCKET_USER}; echo password=\${BITBUCKET_PAT} ;; "
     fi
     if [ -n "${GITLAB_USER:-}" ] && [ -n "${GITLAB_PAT:-}" ]; then
-        cred_arms="${cred_arms}*${gl_host}) echo username=${GITLAB_USER}; echo password=\${GITLAB_PAT} ;; "
+        cred_arms="${cred_arms}${gl_host}) echo username=${GITLAB_USER}; echo password=\${GITLAB_PAT} ;; "
     fi
 
     # Default [user] identity: prefer the explicit GIT_USER_NAME/EMAIL, else
@@ -324,10 +319,14 @@ fi
 
 # ---- 7. Apply workplace policy (telemetry kill, etc.) ------------------------
 # Source policy.yaml as env vars. policy.yaml is yaml-shaped but uses a flat
-# k:v schema for the `env:` block, so we grep it out.
+# k:v schema for the `env:` block, so we grep it out. Values may be quoted
+# ("1", "localhost,...") or bare (true) — trim() (defined in §4) strips a
+# single layer of surrounding quotes/whitespace either way, so both forms
+# export cleanly and a quoted NO_PROXY can no longer clobber the correct
+# unquoted one compose set.
 if [ -f /etc/opencode/policy.yaml ]; then
     while IFS=: read -r k v; do
-        k="${k##* }"; v="${v## }"
+        k="${k##* }"; v="$(trim "${v## }")"
         [ -n "${k}" ] && [ -n "${v}" ] && export "${k}=${v}"
     done < <(awk '/^env:/{flag=1;next} flag && /^[^[:space:]]/{flag=0} flag && /^[[:space:]]+[A-Z_]+:/{sub(/^[[:space:]]+/,""); print}' /etc/opencode/policy.yaml)
 fi
