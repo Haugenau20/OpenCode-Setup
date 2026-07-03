@@ -213,9 +213,6 @@ Per-project named volumes survive container restarts:
 - `oc_state_${PROJECT_SLUG}` — sessions, conversation logs.
 - `oc_cfg_${PROJECT_SLUG}` — user-layer agents/skills/commands.
 
-Setting `ENABLE_SESSION_LOGS=0` swaps the state volume for a tmpfs so nothing
-is persisted to disk.
-
 ## Running multiple stacks in parallel
 
 Two repos open at once = two clones of this scaffold with different

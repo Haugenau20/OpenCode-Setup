@@ -45,7 +45,7 @@ array entries, which we don't use):
 
 Plugins are toggled by **one variable in your host `.env`** —
 `ENABLED_PLUGINS` — exactly like every other switch in this system
-(`ALLOW_REMOTE_GIT`, `ENABLE_SESSION_LOGS`). It is the **single source of truth**
+(`ALLOW_REMOTE_GIT`). It is the **single source of truth**
 for plugins. No container, no YAML, no shell-in.
 
 ```dotenv
