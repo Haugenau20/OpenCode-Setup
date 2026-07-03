@@ -91,6 +91,16 @@ up. The vocabulary:
 - **Git credential helper matched hosts by suffix glob** (`*bitbucket.internal.example`),
   so a lookalike host like `evil-bitbucket.internal.example` would also match
   and receive real credentials. Matching is now exact-host.
+- **`disabled.yaml`'s inline-array forms silently misbehaved**: a same-line
+  inline array (`agents:  [code-reviewer]`, the form `docs/ADDING_SKILLS.md`
+  documents) was parsed as `next`-before-inspecting-the-value and so disabled
+  nothing, and a same-line-empty kind (`skills:  []`) that wasn't the last key
+  in the file could leak the *next* kind's list-form entries into its result.
+  A multi-item dash list also silently returned only its first entry.
+  `disabled_for()`'s awk parser now closes a kind's section on any subsequent
+  key line and inspects same-line values, so every documented form (multiline
+  dash list, same-line inline array, same-line inline empty array, a bracket
+  on its own line) works, in any mix, per kind.
 
 ### Changed
 - **`entrypoint.sh` wraps its top-level boot flow in `main()`**, called only
