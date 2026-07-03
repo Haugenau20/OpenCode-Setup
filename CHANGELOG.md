@@ -48,6 +48,34 @@ up. The vocabulary:
   launcher, on a digest-change nudge) can print what changed without a
   separate fetch, e.g. `docker run --rm <img> sed -n '/^## \[0.0.7\]/,/^## /p'
   /etc/opencode/CHANGELOG.md`.
+- **Local test harness** (`tests/`), mirroring the bats setup in
+  `Opencode-Launcher`: `tests/run.sh` uses a system `bats` or fetches
+  bats-core into `tests/.bats` (gitignored) on first run. `git-guard.bats`
+  runs `opencode/git-guard` directly as a subprocess (blocked/allowed remote
+  ops, the global-option bypass matrix, `remote add`/`set-url` gating,
+  `ALLOW_REMOTE_GIT=1` reaching real git against a local bare repo, local
+  commands behaving exactly like real git). `entrypoint.bats` unit-tests
+  `trim`/`disabled_for`/`apply_policy_env` now that `entrypoint.sh` sources
+  cleanly (see Changed, below) — and pins two real `disabled_for()` parser
+  gaps it found along the way (see `tests/README.md` "Known limitations").
+  `static.bats` checks cheap repo-wide invariants: `manifest.json` agrees
+  with `.env.example`/the `mcp-servers/` directories/the Dockerfile's
+  plugin builds/the entrypoint's `MCP_SERVICES` table; every
+  `squid/allowlist.d/*.conf` line is a well-formed `acl allowed_dst
+  dstdomain` line; `bash -n`/`node --check` across the repo; every tracked
+  JSON file parses. 67 tests total. The MCP gate loop's per-service
+  decision logic is deliberately NOT unit-tested — it needs the image's
+  real `/opt/opencode` filesystem layout; forcing it into a stub would test
+  the stub, not the logic (see `tests/README.md`).
+- **`scripts/check.sh`** — the one-command local gate run before every
+  release (wired into `MAINTAINERS.md` as step 0): `bash -n`, `shellcheck`
+  (if present), JSON validation, `node --check` on the MCP servers, then
+  the full `tests/` suite, with a PASS/FAIL/WARN/SKIP summary per section
+  and a non-zero exit on any failure. Also runs the Docker-dependent checks
+  (building both images, `squid -k parse`, the `MAINTAINERS.md` smoke
+  test) when a Docker daemon is reachable, and lists them as manual
+  reminders otherwise. This is the intended shape of the eventual CI job
+  (no CI infra exists yet — see `docs/CROSS_REPO_REVIEW_2026-07.md` §4.3).
 
 ### Fixed
 - **`git-guard` global-option bypass**: the guard only inspected `$1`, so
@@ -65,6 +93,30 @@ up. The vocabulary:
   and receive real credentials. Matching is now exact-host.
 
 ### Changed
+- **`entrypoint.sh` wraps its top-level boot flow in `main()`**, called only
+  through a bottom source-guard (`[ "${BASH_SOURCE[0]}" = "${0}" ] && main
+  "$@"`), the same pattern `Opencode-Launcher`'s `start.sh` uses — so the
+  file's pure helpers can be unit-tested by sourcing it, without running
+  PID-1 boot logic. This is a **pure code-motion refactor**: every
+  top-level statement moved verbatim into `main()`; the five function
+  definitions that were already there (`log`/`die`/`trim`/`disabled_for`/
+  `symlink_bundle`) stayed top-level, untouched, so they're visible
+  immediately after sourcing; `set -euo pipefail` stays at the very top of
+  the file. The only deliberate logic change is that the former inline §7
+  policy-parse loop is now the reusable `apply_policy_env FILE` function
+  (body unchanged apart from the hardcoded path becoming the `$1`
+  parameter), called from `main()` at the exact point the inline block used
+  to run. Verified two ways: `git diff --color-moved=zebra HEAD~1 --
+  opencode/entrypoint.sh` shows the body of `main()` as **moved** lines, not
+  added/removed — 88 lines colored as moved vs. 34 add/12 del lines, all of
+  which are the new `apply_policy_env`/`main()`/guard boilerplate; and
+  `bash opencode/entrypoint.sh serve` as a non-root user with no env set
+  fails identically before and after (`id: 'dev': no such user`, exit 1).
+  **PID-1-critical — this ships in the runtime image's `ENTRYPOINT`. A live
+  `docker build` + container boot smoke test is required before this lands
+  in a release image** (Docker was not available in the environment this
+  refactor was done in); see `MAINTAINERS.md` step 0 / `scripts/check.sh`'s
+  docker-dependent reminders.
 - **`NODE_MAJOR` bumped `20` → `22`** in `opencode/Dockerfile`. Node 20 reached
   end-of-life April 2026. The MCP servers are pure undici/zod (no native
   addons), so this is low-risk; validated with `node --check` on every
