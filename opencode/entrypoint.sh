@@ -4,39 +4,6 @@ set -euo pipefail
 log() { printf '[entrypoint] %s\n' "$*" >&2; }
 die() { log "FATAL: $*"; exit 1; }
 
-# ---- 1. UID/GID remap so bind-mounted files have sane ownership --------------
-HOST_UID="${HOST_UID:-1000}"
-HOST_GID="${HOST_GID:-1000}"
-
-current_uid="$(id -u dev)"
-current_gid="$(id -g dev)"
-
-if [ "${current_uid}" != "${HOST_UID}" ] || [ "${current_gid}" != "${HOST_GID}" ]; then
-    log "remapping dev to ${HOST_UID}:${HOST_GID} (was ${current_uid}:${current_gid})"
-    groupmod -o -g "${HOST_GID}" dev
-    usermod  -o -u "${HOST_UID}" dev
-    chown -R "${HOST_UID}:${HOST_GID}" /home/dev /workspace
-fi
-
-# ---- 2. Refresh CA bundle in case a volume mounted extra certs ---------------
-update-ca-certificates >/dev/null 2>&1 || true
-
-# ---- 3. Build the merged config layer in ~/.config/opencode ------------------
-USER_CFG=/home/dev/.config/opencode
-BUNDLE=/opt/opencode/bundle
-DISABLED_FILE="${USER_CFG}/disabled.yaml"
-
-mkdir -p "${USER_CFG}"/{agents,skills,commands,mcp,plugin}
-
-# Seed the developer's on/off switch file on first boot. It is the single
-# control surface for toggling bundled content (and the menu the `/plugins`
-# command points at). We never overwrite an existing one — it lives in the
-# user-config volume and is the developer's to edit.
-if [ ! -f "${DISABLED_FILE}" ] && [ -f /etc/opencode/disabled.yaml.default ]; then
-    cp /etc/opencode/disabled.yaml.default "${DISABLED_FILE}"
-    log "seeded ${DISABLED_FILE} (edit it to toggle bundled content; see /plugins)"
-fi
-
 # Read disabled.yaml into bash arrays (simple grep — no yaml parser needed
 # for a flat list-of-lists schema). Falls back to empty arrays.
 disabled_for() {
@@ -80,6 +47,68 @@ symlink_bundle() {
         ln -sfn "${entry}" "${dst}/${name}"
     done
 }
+
+# Strip a single layer of surrounding quotes and any surrounding whitespace that
+# may have leaked in from .env (docker env_file keeps quotes/spaces literally).
+trim() {
+    local v="$1"
+    v="${v#"${v%%[![:space:]]*}"}"   # leading ws
+    v="${v%"${v##*[![:space:]]}"}"   # trailing ws
+    v="${v#\"}"; v="${v%\"}"          # surrounding double quotes
+    v="${v#\'}"; v="${v%\'}"          # surrounding single quotes
+    printf '%s' "$v"
+}
+
+# Source a policy file (yaml-shaped, flat k:v schema under an `env:` block) as
+# env vars. Values may be quoted ("1", "localhost,...") or bare (true) —
+# trim() strips a single layer of surrounding quotes/whitespace either way, so
+# both forms export cleanly and a quoted value can no longer clobber a correct
+# unquoted one compose set. Extracted from the former inline §7 block (see
+# main()) so it is unit-testable; the body is unchanged apart from swapping
+# the formerly-hardcoded /etc/opencode/policy.yaml path for the $1 parameter.
+apply_policy_env() {
+    local file="$1"
+    if [ -f "${file}" ]; then
+        while IFS=: read -r k v; do
+            k="${k##* }"; v="$(trim "${v## }")"
+            [ -n "${k}" ] && [ -n "${v}" ] && export "${k}=${v}"
+        done < <(awk '/^env:/{flag=1;next} flag && /^[^[:space:]]/{flag=0} flag && /^[[:space:]]+[A-Z_]+:/{sub(/^[[:space:]]+/,""); print}' "${file}")
+    fi
+}
+
+main() {
+# ---- 1. UID/GID remap so bind-mounted files have sane ownership --------------
+HOST_UID="${HOST_UID:-1000}"
+HOST_GID="${HOST_GID:-1000}"
+
+current_uid="$(id -u dev)"
+current_gid="$(id -g dev)"
+
+if [ "${current_uid}" != "${HOST_UID}" ] || [ "${current_gid}" != "${HOST_GID}" ]; then
+    log "remapping dev to ${HOST_UID}:${HOST_GID} (was ${current_uid}:${current_gid})"
+    groupmod -o -g "${HOST_GID}" dev
+    usermod  -o -u "${HOST_UID}" dev
+    chown -R "${HOST_UID}:${HOST_GID}" /home/dev /workspace
+fi
+
+# ---- 2. Refresh CA bundle in case a volume mounted extra certs ---------------
+update-ca-certificates >/dev/null 2>&1 || true
+
+# ---- 3. Build the merged config layer in ~/.config/opencode ------------------
+USER_CFG=/home/dev/.config/opencode
+BUNDLE=/opt/opencode/bundle
+DISABLED_FILE="${USER_CFG}/disabled.yaml"
+
+mkdir -p "${USER_CFG}"/{agents,skills,commands,mcp,plugin}
+
+# Seed the developer's on/off switch file on first boot. It is the single
+# control surface for toggling bundled content (and the menu the `/plugins`
+# command points at). We never overwrite an existing one — it lives in the
+# user-config volume and is the developer's to edit.
+if [ ! -f "${DISABLED_FILE}" ] && [ -f /etc/opencode/disabled.yaml.default ]; then
+    cp /etc/opencode/disabled.yaml.default "${DISABLED_FILE}"
+    log "seeded ${DISABLED_FILE} (edit it to toggle bundled content; see /plugins)"
+fi
 
 for kind in agents skills commands mcp; do
     symlink_bundle "${kind}"
@@ -163,17 +192,6 @@ fi
 # and reference them from opencode.json via {file:...}, which works reliably.
 : "${LLM_API_BASE:?LLM_API_BASE not set}"
 : "${LLM_API_KEY:?LLM_API_KEY not set}"
-
-# Strip a single layer of surrounding quotes and any surrounding whitespace that
-# may have leaked in from .env (docker env_file keeps quotes/spaces literally).
-trim() {
-    local v="$1"
-    v="${v#"${v%%[![:space:]]*}"}"   # leading ws
-    v="${v%"${v##*[![:space:]]}"}"   # trailing ws
-    v="${v#\"}"; v="${v%\"}"          # surrounding double quotes
-    v="${v#\'}"; v="${v%\'}"          # surrounding single quotes
-    printf '%s' "$v"
-}
 
 SECRETS_DIR=/home/dev/secrets
 mkdir -p "${SECRETS_DIR}"
@@ -307,18 +325,11 @@ EOF
 fi
 
 # ---- 7. Apply workplace policy (telemetry kill, etc.) ------------------------
-# Source policy.yaml as env vars. policy.yaml is yaml-shaped but uses a flat
-# k:v schema for the `env:` block, so we grep it out. Values may be quoted
-# ("1", "localhost,...") or bare (true) — trim() (defined in §4) strips a
-# single layer of surrounding quotes/whitespace either way, so both forms
-# export cleanly and a quoted NO_PROXY can no longer clobber the correct
-# unquoted one compose set.
-if [ -f /etc/opencode/policy.yaml ]; then
-    while IFS=: read -r k v; do
-        k="${k##* }"; v="$(trim "${v## }")"
-        [ -n "${k}" ] && [ -n "${v}" ] && export "${k}=${v}"
-    done < <(awk '/^env:/{flag=1;next} flag && /^[^[:space:]]/{flag=0} flag && /^[[:space:]]+[A-Z_]+:/{sub(/^[[:space:]]+/,""); print}' /etc/opencode/policy.yaml)
-fi
+# Source policy.yaml as env vars via apply_policy_env() (defined above), which
+# strips a single layer of surrounding quotes/whitespace either way, so both
+# quoted and bare forms export cleanly and a quoted NO_PROXY can no longer
+# clobber the correct unquoted one compose set.
+apply_policy_env /etc/opencode/policy.yaml
 
 # ---- 8. Shell prompt reflects git gate ---------------------------------------
 PROMPT_GIT_TAG='git:ro'
@@ -344,3 +355,14 @@ log "starting opencode: $*"
 exec gosu dev opencode "$@" \
     --hostname 0.0.0.0 \
     --port "${OPENCODE_INTERNAL_PORT:-4096}"
+}
+
+# Run main only when executed directly, not when sourced (e.g. by tests).
+# PID-1-critical: this script is the image's ENTRYPOINT. This wrap is a pure
+# code-motion refactor (see the commit that introduced it for the
+# git diff --color-moved verification) — no logic, ordering, or quoting
+# changed. A live `docker build` + boot smoke test is required before this
+# ships in a release image; see MAINTAINERS.md.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    main "$@"
+fi
