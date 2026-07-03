@@ -20,3 +20,6 @@ extra-allowlist.d/*.conf
 .idea/
 *.swp
 .DS_Store
+
+# Vendored bats-core fetched by tests/run.sh.
+tests/.bats/
