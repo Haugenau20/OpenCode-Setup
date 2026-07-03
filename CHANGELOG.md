@@ -76,6 +76,14 @@ up. The vocabulary:
   tags plus the `latest`/`edge` aliases — pinned to `ubuntu/squid:6.6-24.04_beta`
   by digest (what `latest` resolved to at pin time). See MAINTAINERS.md for
   the re-pin recipe.
+- **`entrypoint.sh` §4b and `scripts/doctor.sh`'s MCP gating are now a table
+  walk** instead of five hand-copied credential-gate blocks each. Both files
+  share the same `"<service>:<needs_user>"` row format, so adding service #6
+  is a one-row diff in each instead of editing five near-duplicate `if`
+  blocks. Behavior (gating conditions, the generated `opencode.json` MCP
+  entries, and every log/check line's wording) is unchanged — verified by
+  diffing the old and new jq filter output byte-for-byte across ~19 env
+  scenarios (all on/off/disabled/partial-credential combinations).
 - **Squid now logs denied requests** (unlisted destination, disallowed
   `CONNECT` port, unsafe port) to `docker compose logs squid`. Allowed
   traffic — including all LLM/conversation data — is still never logged, so

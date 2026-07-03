@@ -198,57 +198,46 @@ MCP_DIR=/opt/opencode/mcp-servers
 mcp_filter='.'
 mcp_jq_args=()
 
-if [ -n "${BITBUCKET_BASE_URL:-}" ] && [ -n "${BITBUCKET_USER:-}" ] \
-   && [ -n "${BITBUCKET_PAT:-}" ] && [ "${DISABLE_BITBUCKET_MCP:-0}" != "1" ]; then
-    mcp_filter="${mcp_filter} | .mcp.bitbucket = {\"type\":\"local\",\"command\":[\"node\",\$bb],\"enabled\":true}"
-    mcp_jq_args+=(--arg bb "${MCP_DIR}/bitbucket/index.js")
-    log "mcp on:  bitbucket (${BITBUCKET_BASE_URL})"
-else
-    log "mcp off: bitbucket (set BITBUCKET_BASE_URL/USER/PAT to enable)"
-fi
+# One row per service: "<name>:<needs_user>". needs_user=1 means the service
+# is also a git remote and authenticates HTTP Basic, so it additionally
+# requires <SVC>_USER (Bitbucket, GitLab); needs_user=0 means it's API-only —
+# no git transport, PAT presented as a Bearer token, no username involved
+# (Jira, JFrog, Confluence). Every service still gates on <SVC>_BASE_URL +
+# <SVC>_PAT + DISABLE_<SVC>_MCP != 1. Adding service #6 is: drop the server
+# dir under mcp-servers/, add its squid allowlist conf, add one row here, add
+# its keys to .env.example AND opencode/manifest.json (see MAINTAINERS.md).
+MCP_SERVICES="bitbucket:1 jira:0 gitlab:1 jfrog:0 confluence:0"
 
-if [ -n "${JIRA_BASE_URL:-}" ] && [ -n "${JIRA_PAT:-}" ] \
-   && [ "${DISABLE_JIRA_MCP:-0}" != "1" ]; then
-    mcp_filter="${mcp_filter} | .mcp.jira = {\"type\":\"local\",\"command\":[\"node\",\$jira],\"enabled\":true}"
-    mcp_jq_args+=(--arg jira "${MCP_DIR}/jira/index.js")
-    log "mcp on:  jira (${JIRA_BASE_URL})"
-else
-    log "mcp off: jira (set JIRA_BASE_URL/PAT to enable)"
-fi
+for entry in ${MCP_SERVICES}; do
+    svc="${entry%%:*}"
+    needs_user="${entry#*:}"
+    SVC="${svc^^}"
 
-if [ -n "${GITLAB_BASE_URL:-}" ] && [ -n "${GITLAB_USER:-}" ] \
-   && [ -n "${GITLAB_PAT:-}" ] && [ "${DISABLE_GITLAB_MCP:-0}" != "1" ]; then
-    mcp_filter="${mcp_filter} | .mcp.gitlab = {\"type\":\"local\",\"command\":[\"node\",\$gitlab],\"enabled\":true}"
-    mcp_jq_args+=(--arg gitlab "${MCP_DIR}/gitlab/index.js")
-    log "mcp on:  gitlab (${GITLAB_BASE_URL})"
-else
-    log "mcp off: gitlab (set GITLAB_BASE_URL/USER/PAT to enable)"
-fi
+    base_var="${SVC}_BASE_URL";     base="${!base_var:-}"
+    pat_var="${SVC}_PAT";           pat="${!pat_var:-}"
+    disable_var="DISABLE_${SVC}_MCP"; disable="${!disable_var:-0}"
 
-# JFrog is API-only (no git transport), so — like Jira — it gates on a
-# BASE_URL + PAT pair, with the PAT presented as a Bearer access token. No
-# JFROG_USER and no git-credential-helper changes below.
-if [ -n "${JFROG_BASE_URL:-}" ] && [ -n "${JFROG_PAT:-}" ] \
-   && [ "${DISABLE_JFROG_MCP:-0}" != "1" ]; then
-    mcp_filter="${mcp_filter} | .mcp.jfrog = {\"type\":\"local\",\"command\":[\"node\",\$jfrog],\"enabled\":true}"
-    mcp_jq_args+=(--arg jfrog "${MCP_DIR}/jfrog/index.js")
-    log "mcp on:  jfrog (${JFROG_BASE_URL})"
-else
-    log "mcp off: jfrog (set JFROG_BASE_URL/PAT to enable)"
-fi
+    # hint mirrors the old hand-written "set X/Y/Z to enable" messages, e.g.
+    # "BITBUCKET_BASE_URL/USER/PAT" vs. "JIRA_BASE_URL/PAT".
+    user_ok=1
+    hint="${SVC}_BASE_URL"
+    if [ "${needs_user}" = "1" ]; then
+        user_var="${SVC}_USER"; user="${!user_var:-}"
+        [ -n "${user}" ] || user_ok=0
+        hint="${hint}/USER"
+    fi
+    hint="${hint}/PAT"
 
-# Confluence is API-only (no git transport), so — like Jira — it gates on a
-# BASE_URL + PAT pair, with the PAT presented as a Bearer access token. If your
-# Confluence listens on its default 8090 connector, include the port in the
-# BASE_URL (that port is opened in squid.conf).
-if [ -n "${CONFLUENCE_BASE_URL:-}" ] && [ -n "${CONFLUENCE_PAT:-}" ] \
-   && [ "${DISABLE_CONFLUENCE_MCP:-0}" != "1" ]; then
-    mcp_filter="${mcp_filter} | .mcp.confluence = {\"type\":\"local\",\"command\":[\"node\",\$confluence],\"enabled\":true}"
-    mcp_jq_args+=(--arg confluence "${MCP_DIR}/confluence/index.js")
-    log "mcp on:  confluence (${CONFLUENCE_BASE_URL})"
-else
-    log "mcp off: confluence (set CONFLUENCE_BASE_URL/PAT to enable)"
-fi
+    if [ -n "${base}" ] && [ "${user_ok}" = "1" ] && [ -n "${pat}" ] \
+       && [ "${disable}" != "1" ]; then
+        arg_name="p_${svc}"
+        mcp_filter="${mcp_filter} | .mcp.${svc} = {\"type\":\"local\",\"command\":[\"node\",\$${arg_name}],\"enabled\":true}"
+        mcp_jq_args+=(--arg "${arg_name}" "${MCP_DIR}/${svc}/index.js")
+        log "mcp on:  ${svc} (${base})"
+    else
+        log "mcp off: ${svc} (set ${hint} to enable)"
+    fi
+done
 
 # Ship the config into the global config dir (alongside bundle symlinks),
 # injecting the enabled MCP blocks, and pin it so opencode loads exactly this
