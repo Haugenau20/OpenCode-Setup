@@ -78,6 +78,16 @@ $EDITOR .env
 docker compose up -d
 ```
 
+## Extra context folders
+
+If the launcher mounts extra folders with `--also <path>` (they land at
+`/workspace-extra/<name>`, alongside your repo at `/workspace`), the container
+leaves the agent a breadcrumb at boot so it actually finds them: a generated
+`~/.config/opencode/workspace-extra.md` listing each folder's path is loaded as
+global context. Without it, an open-ended search stays inside `/workspace` and
+never sees the siblings. Nothing is written into your repo. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#extra-context-folders---also-mounts).
+
 ## Allowing git push
 
 Off by default. See [`docs/ALLOWING_GIT_PUSH.md`](docs/ALLOWING_GIT_PUSH.md).

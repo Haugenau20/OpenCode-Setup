@@ -27,6 +27,25 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
+## [Unreleased]
+
+**Action required:** re-pull image. No `.env` or launcher change needed.
+
+### Added
+- **`--also` extra folders are now discoverable by the agent.** The launcher's
+  `--also <path>` bind-mounts extra host folders into the container at
+  `/workspace-extra/<name>`, as siblings of the repo at `/workspace`. Because
+  opencode runs with `/workspace` as its project root, its file tools never
+  looked outside it and those mounts were invisible to an open-ended search.
+  The entrypoint now enumerates the mounts under `/workspace-extra/` at boot
+  and writes a breadcrumb (`~/.config/opencode/workspace-extra.md`) naming each
+  one, its absolute path, and its inferred read-only/read-write status, then
+  wires it into opencode.json's `instructions` array so opencode loads it as
+  global context alongside `AGENTS.md`. The breadcrumb lives in the config dir,
+  never in `/workspace`, so it never shows up in the user's repo/git status;
+  it is regenerated every boot and removed when no `--also` mounts are present
+  (a no-op, bar one `rm`, on boots without any). New tests cover the generator.
+
 ## [0.0.7] — 2026-07-06
 
 **Action required:** re-pull image + rebuild squid. If your `.env` still sets
