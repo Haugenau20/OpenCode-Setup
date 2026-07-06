@@ -27,172 +27,84 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
-## [Unreleased]
+## [0.0.7] — 2026-07-06
 
-<!-- Action required: re-pull image + rebuild squid (docker compose build
-     squid && docker compose up -d squid). If your .env still has an
-     ENABLE_SESSION_LOGS line, it can be deleted — it is no longer read. -->
+**Action required:** re-pull image + rebuild squid. If your `.env` still sets
+`ENABLE_SESSION_LOGS`, delete it — it is no longer read.
 
 ### Added
-- **Machine-readable image manifest** (`/etc/opencode/manifest.json`), built
-  from the checked-in `opencode/manifest.json` with `image_version`/
-  `opencode_version` injected at build time. Lists every env key the
-  container reads (with required/optional), the MCP servers it ships, and
-  the baked plugins. This is what lets the launcher's drift check notice
-  when the image grows a service the launcher doesn't know about yet
-  (previously silent — see the launcher's own changelog for the check
-  itself). Maintainers: add new env keys here in the same commit that adds
-  them to the entrypoint/an MCP server (see MAINTAINERS.md).
-- **In-image `CHANGELOG.md`** (`/etc/opencode/CHANGELOG.md`) — the running
-  container now carries its own release notes, so a consumer (or the
-  launcher, on a digest-change nudge) can print what changed without a
-  separate fetch, e.g. `docker run --rm <img> sed -n '/^## \[0.0.7\]/,/^## /p'
-  /etc/opencode/CHANGELOG.md`.
-- **Local test harness** (`tests/`), mirroring the bats setup in
-  `Opencode-Launcher`: `tests/run.sh` uses a system `bats` or fetches
-  bats-core into `tests/.bats` (gitignored) on first run. `git-guard.bats`
-  runs `opencode/git-guard` directly as a subprocess (blocked/allowed remote
-  ops, the global-option bypass matrix, `remote add`/`set-url` gating,
-  `ALLOW_REMOTE_GIT=1` reaching real git against a local bare repo, local
-  commands behaving exactly like real git). `entrypoint.bats` unit-tests
-  `trim`/`disabled_for`/`apply_policy_env` now that `entrypoint.sh` sources
-  cleanly (see Changed, below) — and pins two real `disabled_for()` parser
-  gaps it found along the way (see `tests/README.md` "Known limitations").
-  `static.bats` checks cheap repo-wide invariants: `manifest.json` agrees
-  with `.env.example`/the `mcp-servers/` directories/the Dockerfile's
-  plugin builds/the entrypoint's `MCP_SERVICES` table; every
-  `squid/allowlist.d/*.conf` line is a well-formed `acl allowed_dst
-  dstdomain` line; `bash -n`/`node --check` across the repo; every tracked
-  JSON file parses. 67 tests total. The MCP gate loop's per-service
-  decision logic is deliberately NOT unit-tested — it needs the image's
-  real `/opt/opencode` filesystem layout; forcing it into a stub would test
-  the stub, not the logic (see `tests/README.md`).
-- **`scripts/check.sh`** — the one-command local gate run before every
-  release (wired into `MAINTAINERS.md` as step 0): `bash -n`, `shellcheck`
-  (if present), JSON validation, `node --check` on the MCP servers, then
-  the full `tests/` suite, with a PASS/FAIL/WARN/SKIP summary per section
-  and a non-zero exit on any failure. Also runs the Docker-dependent checks
-  (building both images, `squid -k parse`, the `MAINTAINERS.md` smoke
-  test) when a Docker daemon is reachable, and lists them as manual
-  reminders otherwise. This is the intended shape of the eventual CI job
-  (no CI infra exists yet — see `docs/CROSS_REPO_REVIEW_2026-07.md` §4.3).
+- **Machine-readable image manifest** (`/etc/opencode/manifest.json`) listing
+  every env key the container reads, the MCP servers it ships, and the baked
+  plugins — the source the launcher's drift check reads to spot services it
+  doesn't know about yet.
+- **In-image `CHANGELOG.md`** (`/etc/opencode/CHANGELOG.md`) so a running
+  container carries its own release notes.
+- **Local test harness** (`tests/`, bats): `git-guard`, `entrypoint.sh` helpers,
+  and repo-wide static invariants (manifest ↔ `.env.example`/MCP dirs/Dockerfile
+  agree, allowlist syntax, `bash -n`/`node --check`, JSON parses). 67 tests.
+- **`scripts/check.sh`** — one-command pre-release gate (`bash -n`, shellcheck,
+  JSON validation, `node --check`, the `tests/` suite; plus both image builds
+  and `squid -k parse` when a Docker daemon is reachable).
 
 ### Fixed
-- **`git-guard` global-option bypass**: the guard only inspected `$1`, so
-  `git -C <path> push`, `git -c k=v fetch`, `git --git-dir=… pull`, etc. sailed
-  past it without triggering the `ALLOW_REMOTE_GIT` gate. It now scans past
-  git's global options to find the real subcommand before deciding. Also adds
-  `ls-remote` to the blocked set (purely remote, previously ungated).
-- **`policy.yaml` values kept their literal quotes** when exported by the
-  entrypoint (e.g. `OPENCODE_DISABLE_TELEMETRY` exported as the 3-character
-  string `"1"`, and a quoted `NO_PROXY` overwrote the correct unquoted one
-  compose set). The policy parser now strips one layer of surrounding quotes,
-  same as the existing LLM-credential trimming.
-- **Git credential helper matched hosts by suffix glob** (`*bitbucket.internal.example`),
-  so a lookalike host like `evil-bitbucket.internal.example` would also match
-  and receive real credentials. Matching is now exact-host.
-- **`disabled.yaml`'s inline-array forms silently misbehaved**: a same-line
-  inline array (`agents:  [code-reviewer]`, the form `docs/ADDING_SKILLS.md`
-  documents) was parsed as `next`-before-inspecting-the-value and so disabled
-  nothing, and a same-line-empty kind (`skills:  []`) that wasn't the last key
-  in the file could leak the *next* kind's list-form entries into its result.
-  A multi-item dash list also silently returned only its first entry.
-  `disabled_for()`'s awk parser now closes a kind's section on any subsequent
-  key line and inspects same-line values, so every documented form (multiline
-  dash list, same-line inline array, same-line inline empty array, a bracket
-  on its own line) works, in any mix, per kind.
+- **`git-guard` global-option bypass**: `git -C <path> push`, `git -c k=v fetch`,
+  `git --git-dir=… pull`, etc. skipped the `ALLOW_REMOTE_GIT` gate because only
+  `$1` was inspected; it now finds the real subcommand first. `ls-remote` is now
+  gated too.
+- **`policy.yaml` values kept their literal quotes** when exported (e.g. a quoted
+  `NO_PROXY` overwrote the correct value compose set). The parser now strips one
+  layer of surrounding quotes.
+- **Git credential helper matched hosts by suffix glob**, so a lookalike like
+  `evil-bitbucket.internal.example` would also receive real credentials. Matching
+  is now exact-host.
+- **`disabled.yaml` inline-array forms misbehaved** (`agents: [code-reviewer]`,
+  same-line `skills: []`, multi-item dash lists disabled nothing, the wrong
+  kind, or only the first entry). The parser now handles every documented form,
+  in any mix, per kind.
 
 ### Changed
-- **`entrypoint.sh` wraps its top-level boot flow in `main()`**, called only
-  through a bottom source-guard (`[ "${BASH_SOURCE[0]}" = "${0}" ] && main
-  "$@"`), the same pattern `Opencode-Launcher`'s `start.sh` uses — so the
-  file's pure helpers can be unit-tested by sourcing it, without running
-  PID-1 boot logic. This is a **pure code-motion refactor**: every
-  top-level statement moved verbatim into `main()`; the five function
-  definitions that were already there (`log`/`die`/`trim`/`disabled_for`/
-  `symlink_bundle`) stayed top-level, untouched, so they're visible
-  immediately after sourcing; `set -euo pipefail` stays at the very top of
-  the file. The only deliberate logic change is that the former inline §7
-  policy-parse loop is now the reusable `apply_policy_env FILE` function
-  (body unchanged apart from the hardcoded path becoming the `$1`
-  parameter), called from `main()` at the exact point the inline block used
-  to run. Verified two ways: `git diff --color-moved=zebra HEAD~1 --
-  opencode/entrypoint.sh` shows the body of `main()` as **moved** lines, not
-  added/removed — 88 lines colored as moved vs. 34 add/12 del lines, all of
-  which are the new `apply_policy_env`/`main()`/guard boilerplate; and
-  `bash opencode/entrypoint.sh serve` as a non-root user with no env set
-  fails identically before and after (`id: 'dev': no such user`, exit 1).
-  **PID-1-critical — this ships in the runtime image's `ENTRYPOINT`. A live
-  `docker build` + container boot smoke test is required before this lands
-  in a release image** (Docker was not available in the environment this
-  refactor was done in); see `MAINTAINERS.md` step 0 / `scripts/check.sh`'s
-  docker-dependent reminders.
-- **`NODE_MAJOR` bumped `20` → `22`** in `opencode/Dockerfile`. Node 20 reached
-  end-of-life April 2026. The MCP servers are pure undici/zod (no native
-  addons), so this is low-risk; validated with `node --check` on every
-  server file under the new major.
-- **Pinned the squid base image.** `squid/Dockerfile` built `FROM
-  ubuntu/squid:latest`, a moving target under a system whose whole philosophy
-  is deliberate pinning (cf. `OPENCODE_VERSION`). `ubuntu/squid` doesn't
-  publish plain numbered tags, only `<squid>-<ubuntu>_beta`/`_edge` channel
-  tags plus the `latest`/`edge` aliases — pinned to `ubuntu/squid:6.6-24.04_beta`
-  by digest (what `latest` resolved to at pin time). See MAINTAINERS.md for
-  the re-pin recipe.
-- **`entrypoint.sh` §4b and `scripts/doctor.sh`'s MCP gating are now a table
-  walk** instead of five hand-copied credential-gate blocks each. Both files
-  share the same `"<service>:<needs_user>"` row format, so adding service #6
-  is a one-row diff in each instead of editing five near-duplicate `if`
-  blocks. Behavior (gating conditions, the generated `opencode.json` MCP
-  entries, and every log/check line's wording) is unchanged — verified by
-  diffing the old and new jq filter output byte-for-byte across ~19 env
-  scenarios (all on/off/disabled/partial-credential combinations).
-- **New shared MCP helper lib** (`opencode/mcp-servers/_lib/common.js`) for
-  the plumbing all five first-party MCP servers re-implemented separately:
-  the undici `ProxyAgent` dispatcher, env validation, auth-header
-  construction (Bearer/Basic/PRIVATE-TOKEN), a `jsonGet` fetch helper, and
-  MCP tool-error formatting. `_lib` carries its own `package.json` (depends
-  on `undici`) since ESM resolution walks up from the importing file, not
-  its caller. All five servers migrated onto it without changing tool
-  names, descriptions, input schemas, or output text formatting.
-- **Bitbucket's MCP server normalized onto `McpServer` + `server.tool(...)`**
-  (`opencode/mcp-servers/bitbucket/index.js`), matching Jira/Confluence.
-  (GitLab and JFrog also still use the older low-level `Server`/
-  `ListToolsRequestSchema`/`CallToolRequestSchema` API — only Bitbucket's
-  normalization was in scope this pass.) Every tool's name, description,
-  input schema, and output format (`JSON.stringify(result, null, 2)`) is
-  unchanged; verified by sending an MCP `initialize` + `tools/list`
-  handshake to the running server and diffing the returned tool
-  names/descriptions/schemas against the source.
-- **MCP tool errors no longer include `err.stack`.** Every tool error
-  response across all five servers now goes through the shared
-  `toolError()` helper — message (and cause, where a tool already surfaced
-  it) only. A raw Node stack trace in a tool result was pure token noise
-  for the model and never explained *why* a request failed. Verified with
-  a scratch server run that forces a fetch failure (bad hostname) and
-  inspects the returned tool-error text.
-- **Squid now logs denied requests** (unlisted destination, disallowed
-  `CONNECT` port, unsafe port) to `docker compose logs squid`. Allowed
-  traffic — including all LLM/conversation data — is still never logged, so
-  the no-retention stance is unchanged; this only makes self-service
-  allowlist debugging possible (`docs/TROUBLESHOOTING.md` previously pointed
-  at a log line that could never exist).
-- **Removed passwordless `sudo`** for the `dev` user (`usermod`/`groupmod`/`chown`)
-  and dropped the `sudo` package from the image entirely. Nothing legitimate
-  used it — the UID remap runs in the entrypoint as root, before dropping to
-  `dev` via `gosu` — and it allowed re-owning the host workspace bind mount
-  from inside the container.
+- **Squid logs denied requests** (unlisted destination, disallowed `CONNECT`
+  port, unsafe port) to `docker compose logs squid`, making self-service
+  allowlist debugging possible. Allowed traffic — including all LLM/conversation
+  data — is still never logged, so the no-retention stance is unchanged. squid
+  writes them to a file that the container entrypoint tails to stdout (it can't
+  open `/dev/stdout` itself once it drops to the `proxy` user).
+- **Pinned the squid base image** to `ubuntu/squid:6.6-24.04_beta` by digest
+  (was `:latest`), matching the deliberate pinning used for `OPENCODE_VERSION`.
+  See MAINTAINERS.md for the re-pin recipe.
+- **Removed passwordless `sudo`** for the `dev` user and dropped the `sudo`
+  package from the image. Nothing legitimate used it (the UID remap runs as root
+  in the entrypoint before dropping to `dev` via `gosu`), and it allowed
+  re-owning the host workspace bind mount from inside the container.
+- **`entrypoint.sh` boot flow wrapped in `main()`** behind a source-guard so its
+  pure helpers can be unit-tested by sourcing the file. Pure code-motion
+  refactor; the only logic change is the inline §7 policy loop extracted as the
+  reusable `apply_policy_env FILE`. **PID-1-critical — needs a `docker build` +
+  container boot smoke test before it ships** (see MAINTAINERS.md step 0).
+- **MCP credential gating is now a table walk** in both `entrypoint.sh` and
+  `scripts/doctor.sh` (was five hand-copied `if` blocks each), so adding a sixth
+  service is a one-row diff. Behavior verified byte-for-byte unchanged.
+- **New shared MCP helper lib** (`opencode/mcp-servers/_lib/common.js`) for the
+  proxy dispatcher, env validation, auth headers, `jsonGet`, and error
+  formatting all five servers had duplicated; all migrated onto it with no
+  change to tool names, schemas, or output.
+- **Bitbucket MCP server normalized onto `McpServer`/`server.tool(...)`**,
+  matching Jira/Confluence (GitLab and JFrog still use the low-level API); tool
+  surface unchanged.
+- **MCP tool errors no longer include `err.stack`** — message (and cause) only,
+  via a shared `toolError()` helper. A raw stack trace was token noise that never
+  explained *why* a request failed.
+- **`NODE_MAJOR` bumped `20` → `22`** in `opencode/Dockerfile` (Node 20 is EOL
+  April 2026). The MCP servers are pure undici/zod; validated with `node --check`.
 - **`scripts/doctor.sh` treats Bitbucket credentials as optional**, matching
-  `.env.example` and the launcher: `BITBUCKET_USER`/`BITBUCKET_PAT` unset now
-  prints a warning instead of failing the check.
+  `.env.example` and the launcher (unset now warns instead of failing).
 
 ### Removed
-- **`ENABLE_SESSION_LOGS` knob.** It never actually worked: disabling it tried
-  to mount a tmpfs over the state directory, which requires `CAP_SYS_ADMIN`
-  that compose never grants, so the mount always silently failed and session
-  logs were always persisted regardless of the setting. Removed the dead
-  code path, the `.env.example` entry, and the docs that described the
-  (non-functional) toggle. An old `.env` that still sets it is harmlessly
-  ignored.
+- **`ENABLE_SESSION_LOGS` knob** — it never worked. Disabling it tried to mount a
+  tmpfs over the state dir, which needs `CAP_SYS_ADMIN` that compose never
+  grants, so session logs were always persisted anyway. Removed the dead code,
+  the `.env.example` entry, and its docs; an old `.env` that still sets it is
+  harmlessly ignored.
 
 ## [0.0.6] — 2026-06-26
 
