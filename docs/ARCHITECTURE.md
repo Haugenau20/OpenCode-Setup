@@ -142,38 +142,45 @@ disabled:
 `/etc/opencode/disabled.yaml.default` (the entrypoint copies it only if absent),
 so the developer always has a self-documenting menu to edit.
 
-### Extra context folders (`--also` mounts)
+### Extra instruction files (`OPENCODE_EXTRA_INSTRUCTIONS`)
 
-The launcher's `--also <path>` flag bind-mounts extra host folders into the
-container at `/workspace-extra/<name>`, as siblings of the repo at
-`/workspace` — read-only context the agent can consult. But opencode is
-started with `/workspace` as its project root, and its file tools
-(list/glob/grep/read) are anchored there, so an open-ended search never
-looks under `/workspace-extra/` and the mounts are undiscoverable in
-practice (the feature works — the mount is real and readable — but the agent
-never finds it).
+`OPENCODE_EXTRA_INSTRUCTIONS` is a generic hook for surfacing context that
+lives outside the project root. It is a space/comma-separated list of extra
+instruction files (absolute container paths); at boot the entrypoint appends
+each to the generated `opencode.json`'s `instructions` array, which OpenCode
+loads as global context concatenated with the `AGENTS.md` files. Unset ⇒ a
+guaranteed no-op (the entrypoint adds nothing to the config).
 
-The entrypoint fixes this with a **breadcrumb**. At boot it enumerates the
-immediate subdirectories of `/workspace-extra/` (each is one `--also` mount)
-and, if there are any, writes `~/.config/opencode/workspace-extra.md` listing
-each mount's name, absolute container path, and inferred read-only/read-write
-status, then adds that file to the generated `opencode.json`'s `instructions`
-array. OpenCode's `instructions` option loads arbitrary files as global
-context, concatenated with the `AGENTS.md` files — so the breadcrumb reaches
-the agent the same way the house rules do, without being an `AGENTS.md` itself.
+The image knows nothing about *why* a path is on that list — it just loads it.
+This is deliberate. The motivating case is the launcher's `--also <path>`
+flag, which bind-mounts extra host folders at `/workspace-extra/<name>`
+(siblings of the repo at `/workspace`). OpenCode runs with `/workspace` as its
+project root and its file tools (list/glob/grep/read) are anchored there, so an
+open-ended search never looks under `/workspace-extra/` and those mounts are
+undiscoverable in practice — the mount is real and readable, but the agent
+never finds it.
 
-Two properties matter:
+The fix is split along the right seam. Teaching *this image* about
+`/workspace-extra` would couple a general-purpose OpenCode environment to one
+launcher's private mount layout. Instead:
 
-- **It never touches `/workspace`.** That path is a bind mount of the
-  developer's real repo; a breadcrumb written there would show up in their
-  `git status`. The breadcrumb lives in the config dir, which the image owns.
-- **It is idempotent.** The file is regenerated from scratch every boot and
-  removed when no `--also` mounts are present, so it never goes stale. Boots
-  with no extra folders cost nothing beyond a single `rm`.
+- **The launcher owns the whole feature.** It already knows every `--also`
+  mount's name, path, and read-only/read-write status at boot, so it generates
+  a breadcrumb file naming them, mounts it, and sets
+  `OPENCODE_EXTRA_INSTRUCTIONS` to its path. Wording, path convention, and what
+  to advertise all live — and are maintained — in the launcher repo.
+- **The image contributes one stable primitive**: "load the instruction files
+  I'm told to." It never changes as the `--also` feature evolves.
 
-Writability is inferred by testing `[ -w ]` on each mount: the entrypoint runs
-as root with `DAC_OVERRIDE`, so a failure reflects a genuine read-only *mount*
-(the kernel returns `EROFS`), not mere directory permission bits.
+Why the breadcrumb can't just be dropped into a file OpenCode already reads,
+with no image hook at all: OpenCode's automatic instruction locations are
+`/workspace/AGENTS.md` (the developer's real repo — writing there would show up
+in their `git status`) and `~/.config/opencode/AGENTS.md` plus `opencode.json`
+(both **owned by this entrypoint** — the AGENTS.md is a symlink to the bundle,
+and `opencode.json` is regenerated every boot; a file mounted into that dir also
+trips the entrypoint's `chown -R`). So some cooperation from the image is
+unavoidable — `OPENCODE_EXTRA_INSTRUCTIONS` keeps it generic instead of
+`--also`-specific.
 
 ## Plugins
 

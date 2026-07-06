@@ -360,84 +360,47 @@ SRC='source "$ENTRYPOINT"'
   [ "$output" = "1|localhost,127.0.0.1,::1,opencode,rag,squid,.local" ]
 }
 
-# --- write_workspace_extra_breadcrumb() -----------------------------------
-# Enumerates immediate subdirs of a root (each = one launcher --also mount)
-# and writes a breadcrumb naming them, or removes a stale one when there are
-# none. Pure helper: takes (root, outfile) args, so it is exercised here with
-# throwaway tmpdirs, never the real /workspace-extra.
+# --- extra_instruction_paths() --------------------------------------------
+# Generic hook: parses OPENCODE_EXTRA_INSTRUCTIONS (space/comma-separated) into
+# one path per line, which main() appends to opencode.json's `instructions`.
+# The container is `--also`-agnostic; the launcher sets the var. Pure helper —
+# takes the raw value as an arg, so it is exercised directly here.
 
-@test "breadcrumb: a missing root returns 1, prints nothing, and creates no file" {
-  local out="$BATS_TEST_TMPDIR/wx.md"
-  run bash -c "$SRC"'; write_workspace_extra_breadcrumb "'"$BATS_TEST_TMPDIR"'/nope" "'"$out"'"'
-  [ "$status" -eq 1 ]
+@test "extra_instructions: an unset/empty value prints nothing (guaranteed no-op on the common path)" {
+  run bash -c "$SRC"'; extra_instruction_paths ""'
+  [ "$status" -eq 0 ]
   [ -z "$output" ]
-  [ ! -e "$out" ]
+  run bash -c "$SRC"'; extra_instruction_paths'   # no arg at all -> local default
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
-@test "breadcrumb: an empty root returns 1 and removes a stale breadcrumb (idempotent cleanup)" {
-  local root="$BATS_TEST_TMPDIR/extra" out="$BATS_TEST_TMPDIR/wx.md"
-  mkdir -p "$root"
-  printf 'STALE\n' > "$out"
-  run bash -c "$SRC"'; write_workspace_extra_breadcrumb "'"$root"'" "'"$out"'"'
-  [ "$status" -eq 1 ]
-  [ ! -e "$out" ]   # the previous boot's breadcrumb is gone, not left to rot
+@test "extra_instructions: a single path is echoed verbatim" {
+  run bash -c "$SRC"'; extra_instruction_paths "/workspace-extra/.opencode-context.md"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "/workspace-extra/.opencode-context.md" ]
 }
 
-@test "breadcrumb: with mounts it returns 0, prints the count, and lists each name + absolute path" {
-  local root="$BATS_TEST_TMPDIR/extra" out="$BATS_TEST_TMPDIR/wx.md"
-  mkdir -p "$root/demo" "$root/design-system"
-  run bash -c "$SRC"'; write_workspace_extra_breadcrumb "'"$root"'" "'"$out"'"'
+@test "extra_instructions: a space/comma list splits, one path per line, empties dropped" {
+  run bash -c "$SRC"'; extra_instruction_paths "/a/b.md, /c/d.md   /e/f.md,,"'
   [ "$status" -eq 0 ]
-  [ "$output" = "2" ]                       # printed mount count
-  [ -f "$out" ]
-  grep -q "\*\*demo\*\* — \`$root/demo\`" "$out"
-  grep -q "\*\*design-system\*\* — \`$root/design-system\`" "$out"
-  # every mount line carries an inferred read-only/read-write status token
-  grep -qE '\((read-only|read-write)\)' "$out"
-  # a freshly-created, writable dir is reported read-write
-  grep -q "\`$root/demo\` (read-write)" "$out"
+  [ "$output" = "$(printf '/a/b.md\n/c/d.md\n/e/f.md')" ]
 }
 
-@test "breadcrumb: loose files at the root are ignored — only immediate subdirs are mounts" {
-  local root="$BATS_TEST_TMPDIR/extra" out="$BATS_TEST_TMPDIR/wx.md"
-  mkdir -p "$root/onlydir"
-  touch "$root/README" "$root/.hidden"
-  run bash -c "$SRC"'; write_workspace_extra_breadcrumb "'"$root"'" "'"$out"'"'
-  [ "$status" -eq 0 ]
-  [ "$output" = "1" ]                        # the file and dotfile are not counted
-  grep -q 'onlydir' "$out"
-  ! grep -q 'README' "$out"
-}
+@test "extra_instructions: the instructions-array jq wiring is valid and appends (both absent and present)" {
+  # Guards the exact jq fragment §4c appends to cfg_filter per path. bash -n
+  # cannot catch a broken jq expression; this does. Absent -> creates the
+  # array; present -> appends without dropping existing entries.
+  local xi="/workspace-extra/.opencode-context.md"
+  local filter='. | .instructions = ((.instructions // []) + [$xi_0])'
 
-@test "breadcrumb: is regenerated from scratch each call — a shrunk mount set leaves no stale entries" {
-  local root="$BATS_TEST_TMPDIR/extra" out="$BATS_TEST_TMPDIR/wx.md"
-  mkdir -p "$root/demo" "$root/notes"
-  run bash -c "$SRC"'; write_workspace_extra_breadcrumb "'"$root"'" "'"$out"'"'
+  run jq -c --arg xi_0 "$xi" "$filter" <<<'{"theme":"x"}'
   [ "$status" -eq 0 ]
-  [ "$output" = "2" ]
-  # a later boot where "notes" is no longer mounted must not keep advertising it
-  rmdir "$root/notes"
-  run bash -c "$SRC"'; write_workspace_extra_breadcrumb "'"$root"'" "'"$out"'"'
-  [ "$status" -eq 0 ]
-  [ "$output" = "1" ]
-  grep -q 'demo' "$out"
-  ! grep -q 'notes' "$out"
-}
+  [ "$output" = "{\"theme\":\"x\",\"instructions\":[\"$xi\"]}" ]
 
-@test "breadcrumb: the instructions-array jq wiring is valid and appends (both absent and present)" {
-  # Guards the exact jq fragment §4c appends to cfg_filter. bash -n cannot catch
-  # a broken jq expression; this does. Absent -> creates the array; present ->
-  # appends without dropping existing entries.
-  local wx="/home/dev/.config/opencode/workspace-extra.md"
-  local filter='. | .instructions = ((.instructions // []) + [$wx_breadcrumb])'
-
-  run jq -c --arg wx_breadcrumb "$wx" "$filter" <<<'{"theme":"x"}'
+  run jq -c --arg xi_0 "$xi" "$filter" <<<'{"instructions":["AGENTS.md"]}'
   [ "$status" -eq 0 ]
-  [ "$output" = "{\"theme\":\"x\",\"instructions\":[\"$wx\"]}" ]
-
-  run jq -c --arg wx_breadcrumb "$wx" "$filter" <<<'{"instructions":["AGENTS.md"]}'
-  [ "$status" -eq 0 ]
-  [ "$output" = "{\"instructions\":[\"AGENTS.md\",\"$wx\"]}" ]
+  [ "$output" = "{\"instructions\":[\"AGENTS.md\",\"$xi\"]}" ]
 }
 
 # --- direct-execution smoke check ------------------------------------------

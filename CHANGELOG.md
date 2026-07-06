@@ -29,22 +29,27 @@ up. The vocabulary:
 
 ## [Unreleased]
 
-**Action required:** re-pull image. No `.env` or launcher change needed.
+**Action required:** re-pull image. No `.env` change needed. Pairs with a
+launcher change (see below) to make `--also` folders discoverable.
 
 ### Added
-- **`--also` extra folders are now discoverable by the agent.** The launcher's
-  `--also <path>` bind-mounts extra host folders into the container at
-  `/workspace-extra/<name>`, as siblings of the repo at `/workspace`. Because
-  opencode runs with `/workspace` as its project root, its file tools never
-  looked outside it and those mounts were invisible to an open-ended search.
-  The entrypoint now enumerates the mounts under `/workspace-extra/` at boot
-  and writes a breadcrumb (`~/.config/opencode/workspace-extra.md`) naming each
-  one, its absolute path, and its inferred read-only/read-write status, then
-  wires it into opencode.json's `instructions` array so opencode loads it as
-  global context alongside `AGENTS.md`. The breadcrumb lives in the config dir,
-  never in `/workspace`, so it never shows up in the user's repo/git status;
-  it is regenerated every boot and removed when no `--also` mounts are present
-  (a no-op, bar one `rm`, on boots without any). New tests cover the generator.
+- **`OPENCODE_EXTRA_INSTRUCTIONS`** — a generic hook for surfacing context that
+  lives outside the project root. It's a space/comma-separated list of extra
+  instruction files (absolute container paths); at boot the entrypoint appends
+  each to the generated `opencode.json`'s `instructions` array, which opencode
+  concatenates with the `AGENTS.md` files. Guaranteed no-op when unset.
+
+  This exists to fix a real gap: the launcher's `--also <path>` mounts extra
+  folders at `/workspace-extra/<name>` (siblings of the repo at `/workspace`),
+  but opencode runs with `/workspace` as its project root and its file tools
+  never look outside it, so those mounts were undiscoverable by an open-ended
+  search. Rather than teach the image about the launcher's private mount layout,
+  the image just honors this generic var; the **launcher** generates a breadcrumb
+  naming its `--also` folders and points the var at it (launcher ≥ the matching
+  release). The whole `--also` feature — what to advertise, the wording, the
+  path convention — stays maintained in the launcher; the image contributes only
+  this stable primitive. Added to `manifest.json`/`.env.example`; new tests cover
+  the parser and the `instructions` jq wiring.
 
 ## [0.0.7] — 2026-07-06
 

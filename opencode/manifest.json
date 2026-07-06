@@ -26,6 +26,7 @@
     {"key": "DISABLE_JFROG_MCP", "required": false},
     {"key": "DISABLE_CONFLUENCE_MCP", "required": false},
     {"key": "ENABLED_PLUGINS", "required": false},
+    {"key": "OPENCODE_EXTRA_INSTRUCTIONS", "required": false},
     {"key": "HOST_UID", "required": false},
     {"key": "HOST_GID", "required": false}
   ],

@@ -129,62 +129,30 @@ apply_policy_env() {
     fi
 }
 
-# The launcher's `--also <path>` feature bind-mounts extra host folders into
-# the container as siblings of the repo, each at /workspace-extra/<name>. But
-# opencode runs with the repo (/workspace) as its project root and its file
-# tools (list/glob/grep/read) never look outside it, so an open-ended search
-# never discovers those sibling mounts — the feature works (the mount is real
-# and readable) but is undiscoverable in practice.
+# Split OPENCODE_EXTRA_INSTRUCTIONS into one path per line, dropping empties.
+# It is a generic extension point: a space/comma-separated list of extra
+# instruction files (absolute paths) to load as global context — main() appends
+# each to opencode.json's `instructions`, which opencode concatenates with the
+# AGENTS.md files. The container knows nothing about who sets it or why.
 #
-# Fix (breadcrumb): enumerate the immediate subdirectories of <root> (each is
-# one --also mount; the dir name is its <name>) and write a markdown breadcrumb
-# to <out> naming each mount, its absolute container path, and whether it is
-# read-only or read-write (inferred by testing writability — the entrypoint
-# runs as root with DAC_OVERRIDE, so a `[ -w ]` failure reflects a genuine
-# read-only *mount*, not mere permission bits). main() wires <out> into
-# opencode.json's `instructions` array so opencode loads it as global context
-# alongside AGENTS.md.
+# This is the image's whole role in surfacing context that lives outside the
+# project root. The launcher's `--also <path>` feature (which bind-mounts extra
+# folders at /workspace-extra/<name>, siblings of the repo at /workspace that
+# opencode's file tools never discover on their own) uses it to point at a
+# breadcrumb the launcher generates and mounts — but nothing here is
+# `--also`-specific, so the whole feature stays maintained in the launcher.
 #
-# Prints the mount count and returns 0 when at least one mount exists; removes
-# any stale <out> and returns 1 when there are none (or <root> is absent), so
-# the breadcrumb never lingers across a boot with no --also mounts. A
-# param-taking helper (like apply_policy_env) so it is unit-testable without a
-# real /workspace-extra. The write/rm are real filesystem effects and so still
-# take hold when the function runs inside a command substitution.
-write_workspace_extra_breadcrumb() {
-    local root="$1" out="$2"
-    local -a mounts=()
-    local d
-    # A trailing-slash glob matches directories only; with no match (nullglob
-    # off) it stays the literal pattern, which `[ -d ]` then rejects — so a
-    # missing or empty root yields an empty list rather than a phantom entry.
-    for d in "${root}"/*/; do
-        [ -d "${d}" ] || continue
-        mounts+=("${d%/}")
+# Mirrors ENABLED_PLUGINS' tolerant comma/space parsing. Prints nothing (loop
+# body runs zero times) when the var is unset, so it is a guaranteed no-op on
+# the common path. A param-taking helper, like apply_policy_env, so it is
+# unit-testable.
+extra_instruction_paths() {
+    local raw="${1:-}"
+    raw="${raw//,/ }"
+    local p
+    for p in ${raw}; do
+        [ -n "${p}" ] && printf '%s\n' "${p}"
     done
-
-    if [ "${#mounts[@]}" -eq 0 ]; then
-        rm -f "${out}"
-        return 1
-    fi
-
-    local m name status
-    {
-        printf '# Extra context folders (outside the project root)\n\n'
-        printf 'These folders are bind-mounted into this container as extra context,\n'
-        printf 'as siblings of the project root at `/workspace`. They live OUTSIDE the\n'
-        printf 'project root, so the normal file tools (list/glob/grep/read) will not\n'
-        printf 'discover them by searching from `/workspace`. When a request refers to\n'
-        printf 'one of these by name, read it directly at the absolute path listed here.\n\n'
-        for m in "${mounts[@]}"; do
-            name="$(basename "${m}")"
-            if [ -w "${m}" ]; then status="read-write"; else status="read-only"; fi
-            printf -- '- **%s** — `%s` (%s)\n' "${name}" "${m}" "${status}"
-        done
-    } > "${out}"
-
-    printf '%s\n' "${#mounts[@]}"
-    return 0
 }
 
 main() {
@@ -371,30 +339,26 @@ for entry in ${MCP_SERVICES}; do
     fi
 done
 
-# ---- 4c. Extra context folders (launcher --also mounts) ----------------------
-# /workspace-extra is the fixed location the launcher bind-mounts each --also
-# folder into, as a sibling of the repo at /workspace. Like /workspace itself
-# it is a hardcoded image contract, not a configurable knob. Refresh the
-# breadcrumb every boot (see write_workspace_extra_breadcrumb above) and, when
-# there is at least one mount, add it to opencode.json's `instructions` array
-# so opencode loads it as global context. An ABSOLUTE path is required: a bare
-# relative instructions entry resolves against the project root (/workspace),
-# not the config dir. This is a no-op (bar one rm) on boots with no --also
-# mounts. It writes into the config dir — never /workspace — so nothing shows
-# up in the user's repo/git status; §5's chown then hands the file to dev.
-WX_ROOT=/workspace-extra
-WX_BREADCRUMB="${USER_CFG}/workspace-extra.md"
-if wx_count="$(write_workspace_extra_breadcrumb "${WX_ROOT}" "${WX_BREADCRUMB}")"; then
-    cfg_filter="${cfg_filter} | .instructions = ((.instructions // []) + [\$wx_breadcrumb])"
-    cfg_jq_args+=(--arg wx_breadcrumb "${WX_BREADCRUMB}")
-    log "workspace-extra: ${wx_count} extra folder(s) advertised via ${WX_BREADCRUMB}"
-else
-    log "workspace-extra: none mounted (no breadcrumb)"
-fi
+# ---- 4c. Extra instruction files (generic hook) ------------------------------
+# Append any paths in OPENCODE_EXTRA_INSTRUCTIONS to opencode.json's
+# `instructions` (see extra_instruction_paths above). Each must be an ABSOLUTE
+# path: a bare relative instructions entry resolves against the project root
+# (/workspace), not here. Guaranteed no-op when the var is unset. The launcher
+# sets it (in its --also overlay) to a breadcrumb it generates and mounts,
+# keeping that whole feature on its side; the container just loads what it is
+# told to.
+xi_n=0
+while IFS= read -r xi; do
+    [ -n "${xi}" ] || continue
+    cfg_filter="${cfg_filter} | .instructions = ((.instructions // []) + [\$xi_${xi_n}])"
+    cfg_jq_args+=(--arg "xi_${xi_n}" "${xi}")
+    xi_n=$((xi_n + 1))
+    log "extra instructions: + ${xi}"
+done < <(extra_instruction_paths "${OPENCODE_EXTRA_INSTRUCTIONS:-}")
 
 # Ship the config into the global config dir (alongside bundle symlinks),
-# injecting the enabled MCP blocks and the workspace-extra breadcrumb, and pin
-# it so opencode loads exactly this file. With nothing enabled the filter is a
+# injecting the enabled MCP blocks and any extra instruction files, and pin it
+# so opencode loads exactly this file. With nothing enabled the filter is a
 # no-op passthrough.
 jq "${cfg_filter}" "${cfg_jq_args[@]}" /etc/opencode/opencode.json \
     > "${USER_CFG}/opencode.json"

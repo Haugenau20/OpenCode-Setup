@@ -80,13 +80,15 @@ docker compose up -d
 
 ## Extra context folders
 
-If the launcher mounts extra folders with `--also <path>` (they land at
-`/workspace-extra/<name>`, alongside your repo at `/workspace`), the container
-leaves the agent a breadcrumb at boot so it actually finds them: a generated
-`~/.config/opencode/workspace-extra.md` listing each folder's path is loaded as
-global context. Without it, an open-ended search stays inside `/workspace` and
-never sees the siblings. Nothing is written into your repo. See
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#extra-context-folders---also-mounts).
+Folders the launcher mounts with `--also <path>` (they land at
+`/workspace-extra/<name>`, alongside your repo at `/workspace`) are outside
+opencode's project root, so an open-ended search stays inside `/workspace` and
+never sees them. The launcher makes them discoverable by handing the container
+a breadcrumb via `OPENCODE_EXTRA_INSTRUCTIONS` — a generic hook the image
+honors by loading the named file(s) as global context. Nothing is written into
+your repo. The image knows nothing about `--also` itself; that feature is owned
+by the launcher. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#extra-instruction-files-opencode_extra_instructions).
 
 ## Allowing git push
 
