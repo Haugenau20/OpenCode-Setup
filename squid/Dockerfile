@@ -18,5 +18,16 @@ RUN apt-get update \
 
 COPY squid/squid.conf /etc/squid/squid.conf
 COPY squid/allowlist.d/ /etc/squid/allowlist.d/
+COPY squid/entrypoint.sh /usr/local/bin/squid-entrypoint.sh
+RUN chmod +x /usr/local/bin/squid-entrypoint.sh
 
 EXPOSE 3128
+
+# Replace the base image's pebble entrypoint: squid runs in the foreground under
+# a wrapper that also tails the denied-request access log to the container's
+# stdout. squid cannot write that log to /dev/stdout itself because it opens the
+# log after dropping to the unprivileged `proxy` user — see squid/entrypoint.sh.
+# (The oc-publish sidecar reuses this image but overrides the entrypoint in
+# docker-compose, so it is unaffected.)
+ENTRYPOINT ["/usr/local/bin/squid-entrypoint.sh"]
+CMD []
