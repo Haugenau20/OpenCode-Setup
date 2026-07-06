@@ -226,14 +226,18 @@ variable set by the entrypoint, so opencode loads exactly
 
 ## Squid is blocking something I need
 
-Check the URL is on the allowlist:
+Squid logs **denied** requests only — unlisted destinations, a `CONNECT` to a
+non-SSL port, or an unsafe port — never allowed traffic (that stays
+unlogged on purpose, so conversation/LLM data is never retained). Denied
+requests show up in the container's own log:
 
 ```
-docker compose logs squid | grep TCP_DENIED
+docker compose logs squid
 ```
 
-To add an entry yourself, see "Per-developer allowlist additions" in the
-top-level [README](../README.md). Or open a PR if it should ship to
+Look for the denied hostname/port in the output, then add it to the
+allowlist. To add an entry yourself, see "Per-developer allowlist additions"
+in the top-level [README](../README.md). Or open a PR if it should ship to
 everyone.
 
 ## Squid won't start: `ACL 'allowed_dst' already exists with different type`
@@ -276,16 +280,11 @@ You started a second project without changing `PROJECT_SLUG` and
 `OPENCODE_PORT` in its `.env`. Pick different values, `docker compose down`
 the duplicate, then `up -d`.
 
-## Nothing is being saved between restarts
-
-You set `ENABLE_SESSION_LOGS=0`. That swaps the session state volume for
-tmpfs. Flip back to `1` if you want persistence.
-
 ## I broke my user layer
 
 ```
 docker compose down
-docker volume rm opencode-${PROJECT_SLUG}_oc_cfg_${PROJECT_SLUG}
+docker volume rm opencode-${PROJECT_SLUG}_cfg
 docker compose up -d
 ```
 

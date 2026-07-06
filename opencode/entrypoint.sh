@@ -4,6 +4,132 @@ set -euo pipefail
 log() { printf '[entrypoint] %s\n' "$*" >&2; }
 die() { log "FATAL: $*"; exit 1; }
 
+# Read disabled.yaml into bash arrays (simple awk — no yaml parser needed
+# for a flat list-of-lists schema). Falls back to empty arrays.
+#
+# Supports every form documented in docs/ADDING_SKILLS.md, mixed freely per
+# kind within the same file:
+#   kind:                upright multiline list
+#     - a
+#     - b
+#   kind: [a, b]          same-line inline array (with or without a space
+#   kind:  [a,b]           before the bracket, with or without spaces after commas)
+#   kind: []               same-line inline empty array — yields nothing AND
+#                           does not leak into the next kind
+#   kind:                 array bracket on its own line right after the key
+#     [a, b]
+#   (kind absent from the file) — yields nothing
+#
+# One "key:" line (any word immediately followed by a colon, at any indent)
+# both opens the section for a matching kind and closes the section for
+# whichever kind was previously open — that single rule is what makes
+# same-line-empty kinds not leak into whatever list-form kind follows them,
+# and what makes a multi-item dash list keep printing entries instead of
+# bailing out after the first one.
+disabled_for() {
+    local kind="$1"
+    [ -f "${DISABLED_FILE}" ] || return 0
+    awk -v k="${kind}" '
+        function items(s,    v) {
+            v = s
+            gsub(/[][]/, "", v)
+            gsub(/,/, " ", v)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+            return v
+        }
+        # A key line: optional leading whitespace, a bare word, a colon, and
+        # optionally an inline value after it. Dash items ("- foo") and
+        # standalone bracket lines ("[a, b]") never match this — they start
+        # with "-"/"[", not a word character.
+        /^[[:space:]]*[A-Za-z_][A-Za-z0-9_-]*:/ {
+            key = $0
+            sub(/^[[:space:]]*/, "", key)
+            sub(/:.*$/, "", key)
+            rest = $0
+            sub(/^[[:space:]]*[A-Za-z_][A-Za-z0-9_-]*:[[:space:]]*/, "", rest)
+
+            found = (key == k) ? 1 : 0
+            if (found && rest != "") {
+                if (rest ~ /^\[/) {
+                    v = items(rest)
+                    if (v != "") print v
+                }
+                found = 0   # same-line value fully answers this key
+            }
+            next
+        }
+        found && /^[[:space:]]*\[/ {
+            v = items($0)
+            if (v != "") print v
+            found = 0
+            next
+        }
+        found && /^[[:space:]]*-/ {
+            sub(/^[[:space:]]*-[[:space:]]*/, "")
+            print
+            next
+        }
+    ' "${DISABLED_FILE}"
+}
+
+symlink_bundle() {
+    local kind="$1"
+    local src="${BUNDLE}/${kind}"
+    local dst="${USER_CFG}/${kind}"
+    [ -d "${src}" ] || return 0
+
+    # Drop dangling symlinks left by an earlier image/bundle layout. The config
+    # dir is a persistent volume, so stale links survive rebuilds otherwise.
+    find "${dst}" -maxdepth 1 -xtype l -delete 2>/dev/null || true
+
+    local disabled
+    disabled="$(disabled_for "${kind}" | tr '\n' ' ')"
+
+    for entry in "${src}"/*; do
+        [ -e "${entry}" ] || continue
+        local name; name="$(basename "${entry}")"
+        # Skip if disabled or already shadowed by a user file.
+        if printf ' %s ' "${disabled}" | grep -q " ${name%.*} "; then
+            log "skip disabled: ${kind}/${name}"
+            continue
+        fi
+        if [ -e "${dst}/${name}" ] && [ ! -L "${dst}/${name}" ]; then
+            log "skip shadowed:  ${kind}/${name}"
+            continue
+        fi
+        ln -sfn "${entry}" "${dst}/${name}"
+    done
+}
+
+# Strip a single layer of surrounding quotes and any surrounding whitespace that
+# may have leaked in from .env (docker env_file keeps quotes/spaces literally).
+trim() {
+    local v="$1"
+    v="${v#"${v%%[![:space:]]*}"}"   # leading ws
+    v="${v%"${v##*[![:space:]]}"}"   # trailing ws
+    v="${v#\"}"; v="${v%\"}"          # surrounding double quotes
+    v="${v#\'}"; v="${v%\'}"          # surrounding single quotes
+    printf '%s' "$v"
+}
+
+# Source a policy file (yaml-shaped, flat k:v schema under an `env:` block) as
+# env vars. Values may be quoted ("1", "localhost,...") or bare (true) —
+# trim() strips a single layer of surrounding quotes/whitespace either way, so
+# both forms export cleanly and a quoted value can no longer clobber a correct
+# unquoted one compose set. Extracted from the former inline §7 block (see
+# main()) so it is unit-testable; the body is unchanged apart from swapping
+# the formerly-hardcoded /etc/opencode/policy.yaml path for the $1 parameter.
+apply_policy_env() {
+    local file="$1"
+    if [ -f "${file}" ]; then
+        while IFS=: read -r k v; do
+            k="${k##* }"; v="$(trim "${v## }")"
+            [ -n "${k}" ] && [ -n "${v}" ] && export "${k}=${v}"
+        done < <(awk '/^env:/{flag=1;next} flag && /^[^[:space:]]/{flag=0} flag && /^[[:space:]]+[A-Z_]+:/{sub(/^[[:space:]]+/,""); print}' "${file}")
+    fi
+}
+
+main() {
 # ---- 1. UID/GID remap so bind-mounted files have sane ownership --------------
 HOST_UID="${HOST_UID:-1000}"
 HOST_GID="${HOST_GID:-1000}"
@@ -36,50 +162,6 @@ if [ ! -f "${DISABLED_FILE}" ] && [ -f /etc/opencode/disabled.yaml.default ]; th
     cp /etc/opencode/disabled.yaml.default "${DISABLED_FILE}"
     log "seeded ${DISABLED_FILE} (edit it to toggle bundled content; see /plugins)"
 fi
-
-# Read disabled.yaml into bash arrays (simple grep — no yaml parser needed
-# for a flat list-of-lists schema). Falls back to empty arrays.
-disabled_for() {
-    local kind="$1"
-    [ -f "${DISABLED_FILE}" ] || return 0
-    awk -v k="${kind}" '
-        $0 ~ "^[[:space:]]*"k":" {found=1; next}
-        found && /^[[:space:]]*\[/ {
-            gsub(/[][]/, ""); gsub(/,/, " "); print; exit
-        }
-        found && /^[[:space:]]*-/ {sub(/^[[:space:]]*-[[:space:]]*/, ""); print}
-        found && /^[a-zA-Z]/ {exit}
-    ' "${DISABLED_FILE}"
-}
-
-symlink_bundle() {
-    local kind="$1"
-    local src="${BUNDLE}/${kind}"
-    local dst="${USER_CFG}/${kind}"
-    [ -d "${src}" ] || return 0
-
-    # Drop dangling symlinks left by an earlier image/bundle layout. The config
-    # dir is a persistent volume, so stale links survive rebuilds otherwise.
-    find "${dst}" -maxdepth 1 -xtype l -delete 2>/dev/null || true
-
-    local disabled
-    disabled="$(disabled_for "${kind}" | tr '\n' ' ')"
-
-    for entry in "${src}"/*; do
-        [ -e "${entry}" ] || continue
-        local name; name="$(basename "${entry}")"
-        # Skip if disabled or already shadowed by a user file.
-        if printf ' %s ' "${disabled}" | grep -q " ${name%.*} "; then
-            log "skip disabled: ${kind}/${name}"
-            continue
-        fi
-        if [ -e "${dst}/${name}" ] && [ ! -L "${dst}/${name}" ]; then
-            log "skip shadowed:  ${kind}/${name}"
-            continue
-        fi
-        ln -sfn "${entry}" "${dst}/${name}"
-    done
-}
 
 for kind in agents skills commands mcp; do
     symlink_bundle "${kind}"
@@ -164,17 +246,6 @@ fi
 : "${LLM_API_BASE:?LLM_API_BASE not set}"
 : "${LLM_API_KEY:?LLM_API_KEY not set}"
 
-# Strip a single layer of surrounding quotes and any surrounding whitespace that
-# may have leaked in from .env (docker env_file keeps quotes/spaces literally).
-trim() {
-    local v="$1"
-    v="${v#"${v%%[![:space:]]*}"}"   # leading ws
-    v="${v%"${v##*[![:space:]]}"}"   # trailing ws
-    v="${v#\"}"; v="${v%\"}"          # surrounding double quotes
-    v="${v#\'}"; v="${v%\'}"          # surrounding single quotes
-    printf '%s' "$v"
-}
-
 SECRETS_DIR=/home/dev/secrets
 mkdir -p "${SECRETS_DIR}"
 printf '%s' "$(trim "${LLM_API_BASE}")" > "${SECRETS_DIR}/llm_api_base"
@@ -198,57 +269,46 @@ MCP_DIR=/opt/opencode/mcp-servers
 mcp_filter='.'
 mcp_jq_args=()
 
-if [ -n "${BITBUCKET_BASE_URL:-}" ] && [ -n "${BITBUCKET_USER:-}" ] \
-   && [ -n "${BITBUCKET_PAT:-}" ] && [ "${DISABLE_BITBUCKET_MCP:-0}" != "1" ]; then
-    mcp_filter="${mcp_filter} | .mcp.bitbucket = {\"type\":\"local\",\"command\":[\"node\",\$bb],\"enabled\":true}"
-    mcp_jq_args+=(--arg bb "${MCP_DIR}/bitbucket/index.js")
-    log "mcp on:  bitbucket (${BITBUCKET_BASE_URL})"
-else
-    log "mcp off: bitbucket (set BITBUCKET_BASE_URL/USER/PAT to enable)"
-fi
+# One row per service: "<name>:<needs_user>". needs_user=1 means the service
+# is also a git remote and authenticates HTTP Basic, so it additionally
+# requires <SVC>_USER (Bitbucket, GitLab); needs_user=0 means it's API-only —
+# no git transport, PAT presented as a Bearer token, no username involved
+# (Jira, JFrog, Confluence). Every service still gates on <SVC>_BASE_URL +
+# <SVC>_PAT + DISABLE_<SVC>_MCP != 1. Adding service #6 is: drop the server
+# dir under mcp-servers/, add its squid allowlist conf, add one row here, add
+# its keys to .env.example AND opencode/manifest.json (see MAINTAINERS.md).
+MCP_SERVICES="bitbucket:1 jira:0 gitlab:1 jfrog:0 confluence:0"
 
-if [ -n "${JIRA_BASE_URL:-}" ] && [ -n "${JIRA_PAT:-}" ] \
-   && [ "${DISABLE_JIRA_MCP:-0}" != "1" ]; then
-    mcp_filter="${mcp_filter} | .mcp.jira = {\"type\":\"local\",\"command\":[\"node\",\$jira],\"enabled\":true}"
-    mcp_jq_args+=(--arg jira "${MCP_DIR}/jira/index.js")
-    log "mcp on:  jira (${JIRA_BASE_URL})"
-else
-    log "mcp off: jira (set JIRA_BASE_URL/PAT to enable)"
-fi
+for entry in ${MCP_SERVICES}; do
+    svc="${entry%%:*}"
+    needs_user="${entry#*:}"
+    SVC="${svc^^}"
 
-if [ -n "${GITLAB_BASE_URL:-}" ] && [ -n "${GITLAB_USER:-}" ] \
-   && [ -n "${GITLAB_PAT:-}" ] && [ "${DISABLE_GITLAB_MCP:-0}" != "1" ]; then
-    mcp_filter="${mcp_filter} | .mcp.gitlab = {\"type\":\"local\",\"command\":[\"node\",\$gitlab],\"enabled\":true}"
-    mcp_jq_args+=(--arg gitlab "${MCP_DIR}/gitlab/index.js")
-    log "mcp on:  gitlab (${GITLAB_BASE_URL})"
-else
-    log "mcp off: gitlab (set GITLAB_BASE_URL/USER/PAT to enable)"
-fi
+    base_var="${SVC}_BASE_URL";     base="${!base_var:-}"
+    pat_var="${SVC}_PAT";           pat="${!pat_var:-}"
+    disable_var="DISABLE_${SVC}_MCP"; disable="${!disable_var:-0}"
 
-# JFrog is API-only (no git transport), so — like Jira — it gates on a
-# BASE_URL + PAT pair, with the PAT presented as a Bearer access token. No
-# JFROG_USER and no git-credential-helper changes below.
-if [ -n "${JFROG_BASE_URL:-}" ] && [ -n "${JFROG_PAT:-}" ] \
-   && [ "${DISABLE_JFROG_MCP:-0}" != "1" ]; then
-    mcp_filter="${mcp_filter} | .mcp.jfrog = {\"type\":\"local\",\"command\":[\"node\",\$jfrog],\"enabled\":true}"
-    mcp_jq_args+=(--arg jfrog "${MCP_DIR}/jfrog/index.js")
-    log "mcp on:  jfrog (${JFROG_BASE_URL})"
-else
-    log "mcp off: jfrog (set JFROG_BASE_URL/PAT to enable)"
-fi
+    # hint mirrors the old hand-written "set X/Y/Z to enable" messages, e.g.
+    # "BITBUCKET_BASE_URL/USER/PAT" vs. "JIRA_BASE_URL/PAT".
+    user_ok=1
+    hint="${SVC}_BASE_URL"
+    if [ "${needs_user}" = "1" ]; then
+        user_var="${SVC}_USER"; user="${!user_var:-}"
+        [ -n "${user}" ] || user_ok=0
+        hint="${hint}/USER"
+    fi
+    hint="${hint}/PAT"
 
-# Confluence is API-only (no git transport), so — like Jira — it gates on a
-# BASE_URL + PAT pair, with the PAT presented as a Bearer access token. If your
-# Confluence listens on its default 8090 connector, include the port in the
-# BASE_URL (that port is opened in squid.conf).
-if [ -n "${CONFLUENCE_BASE_URL:-}" ] && [ -n "${CONFLUENCE_PAT:-}" ] \
-   && [ "${DISABLE_CONFLUENCE_MCP:-0}" != "1" ]; then
-    mcp_filter="${mcp_filter} | .mcp.confluence = {\"type\":\"local\",\"command\":[\"node\",\$confluence],\"enabled\":true}"
-    mcp_jq_args+=(--arg confluence "${MCP_DIR}/confluence/index.js")
-    log "mcp on:  confluence (${CONFLUENCE_BASE_URL})"
-else
-    log "mcp off: confluence (set CONFLUENCE_BASE_URL/PAT to enable)"
-fi
+    if [ -n "${base}" ] && [ "${user_ok}" = "1" ] && [ -n "${pat}" ] \
+       && [ "${disable}" != "1" ]; then
+        arg_name="p_${svc}"
+        mcp_filter="${mcp_filter} | .mcp.${svc} = {\"type\":\"local\",\"command\":[\"node\",\$${arg_name}],\"enabled\":true}"
+        mcp_jq_args+=(--arg "${arg_name}" "${MCP_DIR}/${svc}/index.js")
+        log "mcp on:  ${svc} (${base})"
+    else
+        log "mcp off: ${svc} (set ${hint} to enable)"
+    fi
+done
 
 # Ship the config into the global config dir (alongside bundle symlinks),
 # injecting the enabled MCP blocks, and pin it so opencode loads exactly this
@@ -257,13 +317,8 @@ jq "${mcp_filter}" "${mcp_jq_args[@]}" /etc/opencode/opencode.json \
     > "${USER_CFG}/opencode.json"
 export OPENCODE_CONFIG="${USER_CFG}/opencode.json"
 
-# ---- 5. Session logs: tmpfs swap if disabled ---------------------------------
+# ---- 5. Session state ownership -----------------------------------------------
 STATE_DIR=/home/dev/.local/share/opencode
-if [ "${ENABLE_SESSION_LOGS:-1}" != "1" ]; then
-    log "session logs disabled; mounting tmpfs over ${STATE_DIR}"
-    mount -t tmpfs -o size=256m tmpfs "${STATE_DIR}" 2>/dev/null \
-        || log "tmpfs mount failed (no CAP_SYS_ADMIN?); using volume anyway"
-fi
 chown -R "${HOST_UID}:${HOST_GID}" "${STATE_DIR}" "${USER_CFG}"
 
 # ---- 6. Git credential helper: host-aware dispatch for multi-host creds ------
@@ -299,10 +354,10 @@ if { [ -n "${BITBUCKET_USER:-}" ] && [ -n "${BITBUCKET_PAT:-}" ]; } \
     # hostnames/creds into the file.
     cred_arms=""
     if [ -n "${BITBUCKET_USER:-}" ] && [ -n "${BITBUCKET_PAT:-}" ]; then
-        cred_arms="${cred_arms}*${bb_host}) echo username=${BITBUCKET_USER}; echo password=\${BITBUCKET_PAT} ;; "
+        cred_arms="${cred_arms}${bb_host}) echo username=${BITBUCKET_USER}; echo password=\${BITBUCKET_PAT} ;; "
     fi
     if [ -n "${GITLAB_USER:-}" ] && [ -n "${GITLAB_PAT:-}" ]; then
-        cred_arms="${cred_arms}*${gl_host}) echo username=${GITLAB_USER}; echo password=\${GITLAB_PAT} ;; "
+        cred_arms="${cred_arms}${gl_host}) echo username=${GITLAB_USER}; echo password=\${GITLAB_PAT} ;; "
     fi
 
     # Default [user] identity: prefer the explicit GIT_USER_NAME/EMAIL, else
@@ -323,14 +378,11 @@ EOF
 fi
 
 # ---- 7. Apply workplace policy (telemetry kill, etc.) ------------------------
-# Source policy.yaml as env vars. policy.yaml is yaml-shaped but uses a flat
-# k:v schema for the `env:` block, so we grep it out.
-if [ -f /etc/opencode/policy.yaml ]; then
-    while IFS=: read -r k v; do
-        k="${k##* }"; v="${v## }"
-        [ -n "${k}" ] && [ -n "${v}" ] && export "${k}=${v}"
-    done < <(awk '/^env:/{flag=1;next} flag && /^[^[:space:]]/{flag=0} flag && /^[[:space:]]+[A-Z_]+:/{sub(/^[[:space:]]+/,""); print}' /etc/opencode/policy.yaml)
-fi
+# Source policy.yaml as env vars via apply_policy_env() (defined above), which
+# strips a single layer of surrounding quotes/whitespace either way, so both
+# quoted and bare forms export cleanly and a quoted NO_PROXY can no longer
+# clobber the correct unquoted one compose set.
+apply_policy_env /etc/opencode/policy.yaml
 
 # ---- 8. Shell prompt reflects git gate ---------------------------------------
 PROMPT_GIT_TAG='git:ro'
@@ -356,3 +408,14 @@ log "starting opencode: $*"
 exec gosu dev opencode "$@" \
     --hostname 0.0.0.0 \
     --port "${OPENCODE_INTERNAL_PORT:-4096}"
+}
+
+# Run main only when executed directly, not when sourced (e.g. by tests).
+# PID-1-critical: this script is the image's ENTRYPOINT. This wrap is a pure
+# code-motion refactor (see the commit that introduced it for the
+# git diff --color-moved verification) — no logic, ordering, or quoting
+# changed. A live `docker build` + boot smoke test is required before this
+# ships in a release image; see MAINTAINERS.md.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    main "$@"
+fi

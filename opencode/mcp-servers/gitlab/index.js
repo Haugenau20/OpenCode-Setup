@@ -22,8 +22,9 @@ import {
     CallToolRequestSchema,
     ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { fetch, ProxyAgent } from "undici";
+import { fetch } from "undici";
 import { z } from "zod";
+import { makeDispatcher, requireEnv, privateTokenAuth, toolError } from "../_lib/common.js";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -35,19 +36,16 @@ import { z } from "zod";
 // unlike a var only export-ed at runtime by PID 1. GITLAB_USER is only needed
 // for git over HTTPS, not the REST API, so it isn't required for the server
 // to start, but we still read it in case callers want it surfaced later.
+requireEnv(["GITLAB_BASE_URL", "GITLAB_PAT"]);
 const GITLAB_BASE_URL = process.env.GITLAB_BASE_URL?.replace(/\/$/, "");
 const GITLAB_USER = process.env.GITLAB_USER;
 const GITLAB_PAT = process.env.GITLAB_PAT;
-const PROXY_URL = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
-
-if (!GITLAB_BASE_URL) throw new Error("GITLAB_BASE_URL is not set");
-if (!GITLAB_PAT) throw new Error("GITLAB_PAT is not set");
 
 // TLS is verified against the corp CA (NODE_EXTRA_CA_CERTS, set in policy.yaml).
 // Do NOT re-add rejectUnauthorized:false — a locked-down image must not skip
 // certificate verification. If TLS to GitLab fails here, the CA isn't in the
 // baked bundle; fix the CA, don't disable the check.
-const proxyAgent = PROXY_URL ? new ProxyAgent(PROXY_URL) : undefined;
+const proxyAgent = makeDispatcher();
 
 // ---------------------------------------------------------------------------
 // HTTP helper
@@ -69,7 +67,7 @@ async function glFetch(path, params = {}) {
     const response = await fetch(url.toString(), {
         method: "GET",
         headers: {
-            "PRIVATE-TOKEN": GITLAB_PAT,
+            "PRIVATE-TOKEN": privateTokenAuth(GITLAB_PAT),
             Accept: "application/json",
         },
         dispatcher: proxyAgent,
@@ -610,10 +608,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         };
     } catch (err) {
-        return {
-            content: [{ type: "text", text: `Error: ${err.message}` }],
-            isError: true,
-        };
+        return toolError(err);
     }
 });
 

@@ -45,7 +45,7 @@ array entries, which we don't use):
 
 Plugins are toggled by **one variable in your host `.env`** —
 `ENABLED_PLUGINS` — exactly like every other switch in this system
-(`ALLOW_REMOTE_GIT`, `ENABLE_SESSION_LOGS`). It is the **single source of truth**
+(`ALLOW_REMOTE_GIT`). It is the **single source of truth**
 for plugins. No container, no YAML, no shell-in.
 
 ```dotenv
@@ -116,7 +116,8 @@ directly. Imports resolve against the entry file's real path, so a vendored
 
 A plugin is a clean fit only if **all** of these hold:
 
-- It runs on **Node 20** (or under OpenCode's bundled Bun) — no `>=22` engine.
+- It runs on **Node 22** (or under OpenCode's bundled Bun) — no engine
+  requirement newer than what `opencode/Dockerfile`'s `NODE_MAJOR` pins.
 - It makes **no required network calls at runtime** (a best-effort,
   failure-tolerant version check is fine; a hard dependency on an external API
   or model download is not). Disable any auto-update — e.g. `dcp` ships a seeded

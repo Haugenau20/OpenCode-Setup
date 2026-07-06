@@ -27,10 +27,20 @@ if [ -f .env ]; then
     ok ".env present"
     load_env ./.env
 
-    for var in LLM_API_BASE LLM_API_KEY BITBUCKET_USER BITBUCKET_PAT \
+    for var in LLM_API_BASE LLM_API_KEY \
                PROJECT_SLUG OPENCODE_PORT REPO_PATH HOST_UID HOST_GID; do
         if [ -z "${!var:-}" ]; then
             bad "${var} is empty"
+        else
+            ok "${var} set"
+        fi
+    done
+
+    # Bitbucket is optional everywhere else in this system (.env.example, the
+    # launcher) — warn rather than fail when it's unset.
+    for var in BITBUCKET_USER BITBUCKET_PAT; do
+        if [ -z "${!var:-}" ]; then
+            warn "${var} unset (optional)"
         else
             ok "${var} set"
         fi
@@ -175,29 +185,32 @@ if docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
         fi
     }
 
-    bb_want=0
-    [ -n "${BITBUCKET_BASE_URL:-}" ] && [ -n "${BITBUCKET_USER:-}" ] \
-        && [ -n "${BITBUCKET_PAT:-}" ] && [ "${DISABLE_BITBUCKET_MCP:-0}" != "1" ] \
-        && bb_want=1
-    jira_want=0
-    [ -n "${JIRA_BASE_URL:-}" ] && [ -n "${JIRA_PAT:-}" ] \
-        && [ "${DISABLE_JIRA_MCP:-0}" != "1" ] && jira_want=1
-    gitlab_want=0
-    [ -n "${GITLAB_BASE_URL:-}" ] && [ -n "${GITLAB_USER:-}" ] \
-        && [ -n "${GITLAB_PAT:-}" ] && [ "${DISABLE_GITLAB_MCP:-0}" != "1" ] \
-        && gitlab_want=1
-    jfrog_want=0
-    [ -n "${JFROG_BASE_URL:-}" ] && [ -n "${JFROG_PAT:-}" ] \
-        && [ "${DISABLE_JFROG_MCP:-0}" != "1" ] && jfrog_want=1
-    confluence_want=0
-    [ -n "${CONFLUENCE_BASE_URL:-}" ] && [ -n "${CONFLUENCE_PAT:-}" ] \
-        && [ "${DISABLE_CONFLUENCE_MCP:-0}" != "1" ] && confluence_want=1
+    # Same table as opencode/entrypoint.sh §4b: "<name>:<needs_user>". Mirror
+    # it here so "add service #6" stays a one-row diff in both places instead
+    # of two hand-written gate copies drifting apart.
+    MCP_SERVICES="bitbucket:1 jira:0 gitlab:1 jfrog:0 confluence:0"
 
-    check_mcp bitbucket "${bb_want}"
-    check_mcp jira "${jira_want}"
-    check_mcp gitlab "${gitlab_want}"
-    check_mcp jfrog "${jfrog_want}"
-    check_mcp confluence "${confluence_want}"
+    for entry in ${MCP_SERVICES}; do
+        svc="${entry%%:*}"
+        needs_user="${entry#*:}"
+        SVC="${svc^^}"
+
+        base_var="${SVC}_BASE_URL";       base="${!base_var:-}"
+        pat_var="${SVC}_PAT";             pat="${!pat_var:-}"
+        disable_var="DISABLE_${SVC}_MCP"; disable="${!disable_var:-0}"
+
+        user_ok=1
+        if [ "${needs_user}" = "1" ]; then
+            user_var="${SVC}_USER"; user="${!user_var:-}"
+            [ -n "${user}" ] || user_ok=0
+        fi
+
+        want=0
+        [ -n "${base}" ] && [ "${user_ok}" = "1" ] && [ -n "${pat}" ] \
+            && [ "${disable}" != "1" ] && want=1
+
+        check_mcp "${svc}" "${want}"
+    done
 else
     warn "stack not running — skipping MCP checks"
 fi

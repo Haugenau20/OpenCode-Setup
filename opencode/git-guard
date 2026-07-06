@@ -5,11 +5,72 @@ set -euo pipefail
 
 REAL_GIT=/usr/bin/git
 
-case "${1:-}" in
-    push|fetch|pull|clone)
+# git dispatches on the first non-option token, so a real invocation can put
+# any number of GLOBAL options (-C <path>, -c <kv>, --git-dir=..., etc.)
+# before the actual subcommand. Gating only on "$1" lets those sail straight
+# past the guard (e.g. `git -C /workspace push`). Walk past them instead.
+#
+# Options below take their argument as a SEPARATE token. The long ones also
+# accept a joined `--opt=value` form, which is handled generically below (any
+# `--foo=bar` token is just skipped as one token, no lookup needed).
+is_separate_arg_opt() {
+    case "$1" in
+        -C|-c|--git-dir|--work-tree|--namespace|--config-env|--exec-path|--attr-source|--super-prefix|--list-cmds)
+            return 0 ;;
+        *)
+            return 1 ;;
+    esac
+}
+
+# "$@" as an indexable array, so we can scan forward without consuming it —
+# the real git still needs the untouched original at the bottom.
+args=("$@")
+argc=${#args[@]}
+
+# Scan args[] starting at index $1 for the first non-option token (skipping
+# global options / bare flags along the way). On a hit, sets REPLY to its
+# index and returns 0; on exhaustion, sets REPLY=-1 and returns 1.
+find_subcommand() {
+    local i="$1" tok
+    while [ "${i}" -lt "${argc}" ]; do
+        tok="${args[${i}]}"
+        case "${tok}" in
+            --*=*)
+                # joined long option, e.g. --git-dir=/path: one token
+                i=$((i + 1))
+                ;;
+            -*)
+                if is_separate_arg_opt "${tok}"; then
+                    i=$((i + 2))   # flag + its separate argument
+                else
+                    i=$((i + 1))   # bare flag (-p, --paginate, --bare, ...);
+                                   # an unrecognized -* token is also treated
+                                   # as bare — a false-positive block is
+                                   # acceptable, a bypass is not.
+                fi
+                ;;
+            *)
+                REPLY="${i}"
+                return 0
+                ;;
+        esac
+    done
+    REPLY=-1
+    return 1
+}
+
+sub=""
+sub_idx=-1
+if find_subcommand 0; then
+    sub_idx="${REPLY}"
+    sub="${args[${sub_idx}]}"
+fi
+
+case "${sub}" in
+    push|fetch|pull|clone|ls-remote)
         if [ "${ALLOW_REMOTE_GIT:-0}" != "1" ]; then
             cat >&2 <<EOF
-git ${1}: blocked by workplace policy.
+git ${sub}: blocked by workplace policy.
 
 Remote git operations are disabled by default in this container. To enable:
   1. Set ALLOW_REMOTE_GIT=1 in your .env
@@ -20,10 +81,14 @@ EOF
         fi
         ;;
     remote)
-        case "${2:-}" in
+        subsub=""
+        if find_subcommand $((sub_idx + 1)); then
+            subsub="${args[${REPLY}]}"
+        fi
+        case "${subsub}" in
             add|set-url|set-branches|set-head|prune|update)
                 if [ "${ALLOW_REMOTE_GIT:-0}" != "1" ]; then
-                    echo "git remote ${2}: blocked (set ALLOW_REMOTE_GIT=1)" >&2
+                    echo "git remote ${subsub}: blocked (set ALLOW_REMOTE_GIT=1)" >&2
                     exit 1
                 fi
                 ;;

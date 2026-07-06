@@ -3,7 +3,7 @@
 #
 # Exercises git-guard in both modes against a local bare repo, checks that
 # BITBUCKET_PAT is not written to disk, and verifies session persistence
-# survives a restart while ENABLE_SESSION_LOGS=0 wipes it.
+# survives a restart.
 #
 # Run from the repo root:  bash scripts/dev/phase-4.sh
 set -uo pipefail
@@ -127,30 +127,9 @@ run "restart stack, check marker survives" bash -c "
     docker exec '${CONTAINER}' cat /home/dev/.local/share/opencode/sessions/phase4.txt
 "
 
-# ---- 4.5 ENABLE_SESSION_LOGS=0 should give us tmpfs (or warn) ----------------
-run "set ENABLE_SESSION_LOGS=0 and recreate" bash -c "
-    grep -q '^ENABLE_SESSION_LOGS=' .env && sed -i 's/^ENABLE_SESSION_LOGS=.*/ENABLE_SESSION_LOGS=0/' .env \
-        || echo 'ENABLE_SESSION_LOGS=0' >> .env
-    docker compose up -d --force-recreate opencode
-    sleep 3
-"
-
-run "mount table (looking for tmpfs over state dir)" \
-    docker exec "${CONTAINER}" bash -c "mount | grep -E 'opencode|tmpfs' || true"
-
-run "marker should be gone after tmpfs swap (or volume still mounted if cap missing — check logs above)" \
-    docker exec "${CONTAINER}" bash -c "
-        if [ -f /home/dev/.local/share/opencode/sessions/phase4.txt ]; then
-            echo 'WARN: marker still present — tmpfs swap likely failed (check entrypoint log)'
-        else
-            echo 'OK: marker gone'
-        fi
-    "
-
 # ---- restore .env so the user is not surprised later -------------------------
 run "restore .env defaults" bash -c "
     sed -i 's/^ALLOW_REMOTE_GIT=.*/ALLOW_REMOTE_GIT=0/' .env
-    sed -i 's/^ENABLE_SESSION_LOGS=.*/ENABLE_SESSION_LOGS=1/' .env
 "
 
 run "tear down" docker compose down

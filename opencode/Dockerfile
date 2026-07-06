@@ -4,7 +4,7 @@
 FROM debian:bookworm-slim AS base
 
 ARG OPENCODE_VERSION=1.17.11
-ARG NODE_MAJOR=20
+ARG NODE_MAJOR=22
 ARG TZ=Europe/Copenhagen
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         bash git vim less jq ripgrep fd-find \
         build-essential python3 python3-pip python3-venv \
         openssh-client iproute2 dnsutils \
-        sudo gosu \
+        gosu \
     && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
     && ln -sf /usr/share/zoneinfo/${TZ} /etc/localtime \
     && echo "${TZ}" > /etc/timezone \
@@ -40,7 +40,7 @@ RUN update-ca-certificates
 # entrypoint reads (`<symlink-name>=<relative/entry/path>` per line). At runtime
 # OpenCode 1.16.2 auto-scans `plugin/*.{ts,js}` and imports the symlinked entry
 # files directly — no Bun install, no network. Bump a *_REF to update a plugin.
-# `base` already carries node 20, git, build-essential, and python3.
+# `base` already carries node 22, git, build-essential, and python3.
 FROM base AS plugins-build
 
 # Pin every plugin. superpowers/workspace publish no usable tags, so they pin by
@@ -104,7 +104,7 @@ RUN git clone https://github.com/kdcokenny/opencode-workspace.git workspace \
 # under opencode/mcp-servers/. The loop below globs every directory, so adding a
 # new server folder needs no change here. Install their runtime deps so nothing
 # hits npm at container start — the egress lock would block it. Deps are pure JS
-# (undici, zod, the MCP SDK); no native build. `base` already carries node 20 + npm.
+# (undici, zod, the MCP SDK); no native build. `base` already carries node 22 + npm.
 FROM base AS mcp-build
 COPY opencode/mcp-servers/ /staging/mcp-servers/
 RUN set -eu; for d in /staging/mcp-servers/*/; do \
@@ -115,6 +115,17 @@ RUN set -eu; for d in /staging/mcp-servers/*/; do \
 # ---- Runtime: opencode + workplace bundle ------------------------------------
 FROM base AS runtime
 
+# ARG scope resets at every FROM, even one naming a prior stage — redeclare
+# both here so their values are actually available to THIS stage's RUN/LABEL
+# instructions (without this, OPENCODE_VERSION silently evaluated empty below,
+# and the OCI label MAINTAINERS.md promises never carried the real version).
+ARG OPENCODE_VERSION=1.17.11
+# IMAGE_VERSION is the opencode-workplace image's OWN release version (semver
+# tag pushed to Artifactory, e.g. 0.0.7 — see MAINTAINERS.md "Cutting a
+# release"), distinct from OPENCODE_VERSION (the upstream opencode CLI it
+# bundles). Defaults to "local" for dev builds that don't pass it explicitly.
+ARG IMAGE_VERSION=local
+
 # Install opencode globally. Version is pinned per build and recorded as an
 # OCI label so `docker inspect` shows what's inside.
 RUN npm install -g opencode-ai@${OPENCODE_VERSION} \
@@ -124,6 +135,24 @@ RUN npm install -g opencode-ai@${OPENCODE_VERSION} \
 COPY opencode/bundle/ /opt/opencode/bundle/
 COPY opencode/policy.yaml /etc/opencode/policy.yaml
 COPY opencode/opencode.json /etc/opencode/opencode.json
+
+# Machine-readable statement of what THIS image consumes (env keys it reads,
+# MCP servers it ships, plugins it bakes) — the launcher's drift check reads
+# this to notice when the image adds a service the launcher doesn't know
+# about yet. opencode/manifest.json is the maintainer-edited source of truth;
+# image_version/opencode_version are injected here from the build args so the
+# manifest always matches what actually got built, not what was last hand-
+# edited into the checked-in file.
+COPY opencode/manifest.json /etc/opencode/manifest.json.src
+RUN jq --arg v "${IMAGE_VERSION}" --arg ov "${OPENCODE_VERSION}" \
+       '.image_version = $v | .opencode_version = $ov' \
+       /etc/opencode/manifest.json.src > /etc/opencode/manifest.json \
+    && rm /etc/opencode/manifest.json.src
+
+# In-image release notes: lets a consumer (or the launcher) read what changed
+# for the exact image they pulled without a separate fetch, e.g.
+# `docker run --rm <img> sed -n '/^## \[0.0.7\]/,/^## /p' /etc/opencode/CHANGELOG.md`.
+COPY CHANGELOG.md /etc/opencode/CHANGELOG.md
 
 # Opt-in plugins, built and vendored in the plugins-build stage. The entrypoint
 # symlinks the entry files of ENABLED plugins (per disabled.yaml) into the user
@@ -147,12 +176,12 @@ COPY opencode/git-guard /usr/local/bin/git-guard
 RUN chmod +x /usr/local/bin/git-guard \
     && ln -sf /usr/local/bin/git-guard /usr/local/bin/git
 
-# Non-root user. UID/GID get remapped at start to match the host.
+# Non-root user. UID/GID get remapped at start to match the host — that remap
+# runs in the entrypoint AS ROOT (before gosu drops to dev), so dev needs no
+# sudo of its own. Granting it would only widen the blast radius (e.g. `sudo
+# chown -R 0:0 /workspace` against the host bind mount).
 RUN groupadd --gid 1000 dev \
-    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash dev \
-    && echo 'dev ALL=(ALL) NOPASSWD: /usr/sbin/usermod, /usr/sbin/groupmod, /usr/bin/chown' \
-         > /etc/sudoers.d/dev-uid-remap \
-    && chmod 0440 /etc/sudoers.d/dev-uid-remap
+    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash dev
 
 COPY opencode/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
@@ -164,6 +193,7 @@ RUN mkdir -p /home/dev/.config/opencode /home/dev/.local/share/opencode /workspa
 LABEL org.opencontainers.image.title="opencode-workplace" \
       org.opencontainers.image.description="Locked-down OpenCode for internal use" \
       org.opencontainers.image.source="https://bitbucket.example.com/opencode-workplace" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
       opencode.version="${OPENCODE_VERSION}"
 
 EXPOSE 4096

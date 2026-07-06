@@ -27,7 +27,84 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
-## [Unreleased]
+## [0.0.7] — 2026-07-06
+
+**Action required:** re-pull image + rebuild squid. If your `.env` still sets
+`ENABLE_SESSION_LOGS`, delete it — it is no longer read.
+
+### Added
+- **Machine-readable image manifest** (`/etc/opencode/manifest.json`) listing
+  every env key the container reads, the MCP servers it ships, and the baked
+  plugins — the source the launcher's drift check reads to spot services it
+  doesn't know about yet.
+- **In-image `CHANGELOG.md`** (`/etc/opencode/CHANGELOG.md`) so a running
+  container carries its own release notes.
+- **Local test harness** (`tests/`, bats): `git-guard`, `entrypoint.sh` helpers,
+  and repo-wide static invariants (manifest ↔ `.env.example`/MCP dirs/Dockerfile
+  agree, allowlist syntax, `bash -n`/`node --check`, JSON parses). 67 tests.
+- **`scripts/check.sh`** — one-command pre-release gate (`bash -n`, shellcheck,
+  JSON validation, `node --check`, the `tests/` suite; plus both image builds
+  and `squid -k parse` when a Docker daemon is reachable).
+
+### Fixed
+- **`git-guard` global-option bypass**: `git -C <path> push`, `git -c k=v fetch`,
+  `git --git-dir=… pull`, etc. skipped the `ALLOW_REMOTE_GIT` gate because only
+  `$1` was inspected; it now finds the real subcommand first. `ls-remote` is now
+  gated too.
+- **`policy.yaml` values kept their literal quotes** when exported (e.g. a quoted
+  `NO_PROXY` overwrote the correct value compose set). The parser now strips one
+  layer of surrounding quotes.
+- **Git credential helper matched hosts by suffix glob**, so a lookalike like
+  `evil-bitbucket.internal.example` would also receive real credentials. Matching
+  is now exact-host.
+- **`disabled.yaml` inline-array forms misbehaved** (`agents: [code-reviewer]`,
+  same-line `skills: []`, multi-item dash lists disabled nothing, the wrong
+  kind, or only the first entry). The parser now handles every documented form,
+  in any mix, per kind.
+
+### Changed
+- **Squid logs denied requests** (unlisted destination, disallowed `CONNECT`
+  port, unsafe port) to `docker compose logs squid`, making self-service
+  allowlist debugging possible. Allowed traffic — including all LLM/conversation
+  data — is still never logged, so the no-retention stance is unchanged. squid
+  writes them to a file that the container entrypoint tails to stdout (it can't
+  open `/dev/stdout` itself once it drops to the `proxy` user).
+- **Pinned the squid base image** to `ubuntu/squid:6.6-24.04_beta` by digest
+  (was `:latest`), matching the deliberate pinning used for `OPENCODE_VERSION`.
+  See MAINTAINERS.md for the re-pin recipe.
+- **Removed passwordless `sudo`** for the `dev` user and dropped the `sudo`
+  package from the image. Nothing legitimate used it (the UID remap runs as root
+  in the entrypoint before dropping to `dev` via `gosu`), and it allowed
+  re-owning the host workspace bind mount from inside the container.
+- **`entrypoint.sh` boot flow wrapped in `main()`** behind a source-guard so its
+  pure helpers can be unit-tested by sourcing the file. Pure code-motion
+  refactor; the only logic change is the inline §7 policy loop extracted as the
+  reusable `apply_policy_env FILE`. **PID-1-critical — needs a `docker build` +
+  container boot smoke test before it ships** (see MAINTAINERS.md step 0).
+- **MCP credential gating is now a table walk** in both `entrypoint.sh` and
+  `scripts/doctor.sh` (was five hand-copied `if` blocks each), so adding a sixth
+  service is a one-row diff. Behavior verified byte-for-byte unchanged.
+- **New shared MCP helper lib** (`opencode/mcp-servers/_lib/common.js`) for the
+  proxy dispatcher, env validation, auth headers, `jsonGet`, and error
+  formatting all five servers had duplicated; all migrated onto it with no
+  change to tool names, schemas, or output.
+- **Bitbucket MCP server normalized onto `McpServer`/`server.tool(...)`**,
+  matching Jira/Confluence (GitLab and JFrog still use the low-level API); tool
+  surface unchanged.
+- **MCP tool errors no longer include `err.stack`** — message (and cause) only,
+  via a shared `toolError()` helper. A raw stack trace was token noise that never
+  explained *why* a request failed.
+- **`NODE_MAJOR` bumped `20` → `22`** in `opencode/Dockerfile` (Node 20 is EOL
+  April 2026). The MCP servers are pure undici/zod; validated with `node --check`.
+- **`scripts/doctor.sh` treats Bitbucket credentials as optional**, matching
+  `.env.example` and the launcher (unset now warns instead of failing).
+
+### Removed
+- **`ENABLE_SESSION_LOGS` knob** — it never worked. Disabling it tried to mount a
+  tmpfs over the state dir, which needs `CAP_SYS_ADMIN` that compose never
+  grants, so session logs were always persisted anyway. Removed the dead code,
+  the `.env.example` entry, and its docs; an old `.env` that still sets it is
+  harmlessly ignored.
 
 ## [0.0.6] — 2026-06-26
 
