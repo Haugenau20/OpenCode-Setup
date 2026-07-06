@@ -48,8 +48,10 @@ launcher change (see below) to make `--also` folders discoverable.
   naming its `--also` folders and points the var at it (launcher ≥ the matching
   release). The whole `--also` feature — what to advertise, the wording, the
   path convention — stays maintained in the launcher; the image contributes only
-  this stable primitive. Added to `manifest.json`/`.env.example`; new tests cover
-  the parser and the `instructions` jq wiring.
+  this stable primitive. Kept out of `manifest.json`/`.env.example` on purpose:
+  it is internal launcher→image plumbing (injected by the launcher's `--also`
+  compose overlay), never a user-set knob, so it is not surfaced as a documented
+  env key. New tests cover the parser and the `instructions` jq wiring.
 
 ## [0.0.7] — 2026-07-06
 

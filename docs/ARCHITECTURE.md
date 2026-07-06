@@ -182,6 +182,17 @@ trips the entrypoint's `chown -R`). So some cooperation from the image is
 unavoidable — `OPENCODE_EXTRA_INSTRUCTIONS` keeps it generic instead of
 `--also`-specific.
 
+`OPENCODE_EXTRA_INSTRUCTIONS` is intentionally **absent from
+`manifest.json` and `.env.example`**, unlike every other env key the container
+reads (see [Config layering](#config-layering) and MAINTAINERS.md). It is
+internal launcher→image plumbing — injected by the launcher's `--also` compose
+overlay, never set by a user — so documenting it would only surface a
+never-touched knob in every `.env` and force the launcher's manifest drift check
+to demand it in the launcher's `.env.example`. The manifest exists to flag
+*user-supplied* keys an older launcher wouldn't know to prompt for; a
+launcher-injected var can't drift that way, so it stays off the manifest by
+design.
+
 ## Plugins
 
 Plugins (`bundle/plugins/<name>/`) are handled differently from the other

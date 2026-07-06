@@ -142,6 +142,16 @@ apply_policy_env() {
 # breadcrumb the launcher generates and mounts — but nothing here is
 # `--also`-specific, so the whole feature stays maintained in the launcher.
 #
+# Deliberately NOT in manifest.json/.env.example (despite the MAINTAINERS.md
+# "every env key the container reads goes in the manifest" rule): this var is
+# internal launcher->image plumbing, injected by the launcher's --also compose
+# overlay, never something a user sets by hand. Listing it would only surface a
+# never-touched knob in every .env and make the launcher's manifest drift check
+# demand it in the launcher's .env.example too. The manifest exists to catch
+# USER-supplied keys an old launcher wouldn't know to prompt for; a
+# launcher-injected var can't drift that way, so it stays off the manifest on
+# purpose. Do not re-add it.
+#
 # Mirrors ENABLED_PLUGINS' tolerant comma/space parsing. Prints nothing (loop
 # body runs zero times) when the var is unset, so it is a guaranteed no-op on
 # the common path. A param-taking helper, like apply_policy_env, so it is
