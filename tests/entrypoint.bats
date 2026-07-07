@@ -360,6 +360,49 @@ SRC='source "$ENTRYPOINT"'
   [ "$output" = "1|localhost,127.0.0.1,::1,opencode,rag,squid,.local" ]
 }
 
+# --- extra_instruction_paths() --------------------------------------------
+# Generic hook: parses OPENCODE_EXTRA_INSTRUCTIONS (space/comma-separated) into
+# one path per line, which main() appends to opencode.json's `instructions`.
+# The container is `--also`-agnostic; the launcher sets the var. Pure helper —
+# takes the raw value as an arg, so it is exercised directly here.
+
+@test "extra_instructions: an unset/empty value prints nothing (guaranteed no-op on the common path)" {
+  run bash -c "$SRC"'; extra_instruction_paths ""'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run bash -c "$SRC"'; extra_instruction_paths'   # no arg at all -> local default
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "extra_instructions: a single path is echoed verbatim" {
+  run bash -c "$SRC"'; extra_instruction_paths "/workspace-extra/.opencode-context.md"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "/workspace-extra/.opencode-context.md" ]
+}
+
+@test "extra_instructions: a space/comma list splits, one path per line, empties dropped" {
+  run bash -c "$SRC"'; extra_instruction_paths "/a/b.md, /c/d.md   /e/f.md,,"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '/a/b.md\n/c/d.md\n/e/f.md')" ]
+}
+
+@test "extra_instructions: the instructions-array jq wiring is valid and appends (both absent and present)" {
+  # Guards the exact jq fragment §4c appends to cfg_filter per path. bash -n
+  # cannot catch a broken jq expression; this does. Absent -> creates the
+  # array; present -> appends without dropping existing entries.
+  local xi="/workspace-extra/.opencode-context.md"
+  local filter='. | .instructions = ((.instructions // []) + [$xi_0])'
+
+  run jq -c --arg xi_0 "$xi" "$filter" <<<'{"theme":"x"}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "{\"theme\":\"x\",\"instructions\":[\"$xi\"]}" ]
+
+  run jq -c --arg xi_0 "$xi" "$filter" <<<'{"instructions":["AGENTS.md"]}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "{\"instructions\":[\"AGENTS.md\",\"$xi\"]}" ]
+}
+
 # --- direct-execution smoke check ------------------------------------------
 # Not a unit test of a pure function — a regression guard that the
 # main()-wrap refactor didn't change entrypoint.sh's behavior when it's

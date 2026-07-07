@@ -27,6 +27,32 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
+## [Unreleased]
+
+**Action required:** re-pull image. No `.env` change needed. Pairs with a
+launcher change (see below) to make `--also` folders discoverable.
+
+### Added
+- **`OPENCODE_EXTRA_INSTRUCTIONS`** — a generic hook for surfacing context that
+  lives outside the project root. It's a space/comma-separated list of extra
+  instruction files (absolute container paths); at boot the entrypoint appends
+  each to the generated `opencode.json`'s `instructions` array, which opencode
+  concatenates with the `AGENTS.md` files. Guaranteed no-op when unset.
+
+  This exists to fix a real gap: the launcher's `--also <path>` mounts extra
+  folders at `/workspace-extra/<name>` (siblings of the repo at `/workspace`),
+  but opencode runs with `/workspace` as its project root and its file tools
+  never look outside it, so those mounts were undiscoverable by an open-ended
+  search. Rather than teach the image about the launcher's private mount layout,
+  the image just honors this generic var; the **launcher** generates a breadcrumb
+  naming its `--also` folders and points the var at it (launcher ≥ the matching
+  release). The whole `--also` feature — what to advertise, the wording, the
+  path convention — stays maintained in the launcher; the image contributes only
+  this stable primitive. Kept out of `manifest.json`/`.env.example` on purpose:
+  it is internal launcher→image plumbing (injected by the launcher's `--also`
+  compose overlay), never a user-set knob, so it is not surfaced as a documented
+  env key. New tests cover the parser and the `instructions` jq wiring.
+
 ## [0.0.7] — 2026-07-06
 
 **Action required:** re-pull image + rebuild squid. If your `.env` still sets

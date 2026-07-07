@@ -129,6 +129,42 @@ apply_policy_env() {
     fi
 }
 
+# Split OPENCODE_EXTRA_INSTRUCTIONS into one path per line, dropping empties.
+# It is a generic extension point: a space/comma-separated list of extra
+# instruction files (absolute paths) to load as global context — main() appends
+# each to opencode.json's `instructions`, which opencode concatenates with the
+# AGENTS.md files. The container knows nothing about who sets it or why.
+#
+# This is the image's whole role in surfacing context that lives outside the
+# project root. The launcher's `--also <path>` feature (which bind-mounts extra
+# folders at /workspace-extra/<name>, siblings of the repo at /workspace that
+# opencode's file tools never discover on their own) uses it to point at a
+# breadcrumb the launcher generates and mounts — but nothing here is
+# `--also`-specific, so the whole feature stays maintained in the launcher.
+#
+# Deliberately NOT in manifest.json/.env.example (despite the MAINTAINERS.md
+# "every env key the container reads goes in the manifest" rule): this var is
+# internal launcher->image plumbing, injected by the launcher's --also compose
+# overlay, never something a user sets by hand. Listing it would only surface a
+# never-touched knob in every .env and make the launcher's manifest drift check
+# demand it in the launcher's .env.example too. The manifest exists to catch
+# USER-supplied keys an old launcher wouldn't know to prompt for; a
+# launcher-injected var can't drift that way, so it stays off the manifest on
+# purpose. Do not re-add it.
+#
+# Mirrors ENABLED_PLUGINS' tolerant comma/space parsing. Prints nothing (loop
+# body runs zero times) when the var is unset, so it is a guaranteed no-op on
+# the common path. A param-taking helper, like apply_policy_env, so it is
+# unit-testable.
+extra_instruction_paths() {
+    local raw="${1:-}"
+    raw="${raw//,/ }"
+    local p
+    for p in ${raw}; do
+        [ -n "${p}" ] && printf '%s\n' "${p}"
+    done
+}
+
 main() {
 # ---- 1. UID/GID remap so bind-mounted files have sane ownership --------------
 HOST_UID="${HOST_UID:-1000}"
@@ -266,8 +302,11 @@ chown -R "${HOST_UID}:${HOST_GID}" "${SECRETS_DIR}"
 # NOT export derived vars here: a runtime export only lives in PID 1 and would
 # be missing if the TUI process is the one that launches the server.
 MCP_DIR=/opt/opencode/mcp-servers
-mcp_filter='.'
-mcp_jq_args=()
+# cfg_filter/cfg_jq_args accumulate the jq that turns the shipped opencode.json
+# template into the final generated config: the enabled MCP blocks below, then
+# the workspace-extra breadcrumb in §4c. They start as a no-op passthrough.
+cfg_filter='.'
+cfg_jq_args=()
 
 # One row per service: "<name>:<needs_user>". needs_user=1 means the service
 # is also a git remote and authenticates HTTP Basic, so it additionally
@@ -302,18 +341,36 @@ for entry in ${MCP_SERVICES}; do
     if [ -n "${base}" ] && [ "${user_ok}" = "1" ] && [ -n "${pat}" ] \
        && [ "${disable}" != "1" ]; then
         arg_name="p_${svc}"
-        mcp_filter="${mcp_filter} | .mcp.${svc} = {\"type\":\"local\",\"command\":[\"node\",\$${arg_name}],\"enabled\":true}"
-        mcp_jq_args+=(--arg "${arg_name}" "${MCP_DIR}/${svc}/index.js")
+        cfg_filter="${cfg_filter} | .mcp.${svc} = {\"type\":\"local\",\"command\":[\"node\",\$${arg_name}],\"enabled\":true}"
+        cfg_jq_args+=(--arg "${arg_name}" "${MCP_DIR}/${svc}/index.js")
         log "mcp on:  ${svc} (${base})"
     else
         log "mcp off: ${svc} (set ${hint} to enable)"
     fi
 done
 
+# ---- 4c. Extra instruction files (generic hook) ------------------------------
+# Append any paths in OPENCODE_EXTRA_INSTRUCTIONS to opencode.json's
+# `instructions` (see extra_instruction_paths above). Each must be an ABSOLUTE
+# path: a bare relative instructions entry resolves against the project root
+# (/workspace), not here. Guaranteed no-op when the var is unset. The launcher
+# sets it (in its --also overlay) to a breadcrumb it generates and mounts,
+# keeping that whole feature on its side; the container just loads what it is
+# told to.
+xi_n=0
+while IFS= read -r xi; do
+    [ -n "${xi}" ] || continue
+    cfg_filter="${cfg_filter} | .instructions = ((.instructions // []) + [\$xi_${xi_n}])"
+    cfg_jq_args+=(--arg "xi_${xi_n}" "${xi}")
+    xi_n=$((xi_n + 1))
+    log "extra instructions: + ${xi}"
+done < <(extra_instruction_paths "${OPENCODE_EXTRA_INSTRUCTIONS:-}")
+
 # Ship the config into the global config dir (alongside bundle symlinks),
-# injecting the enabled MCP blocks, and pin it so opencode loads exactly this
-# file. With no MCPs enabled the filter is a no-op passthrough.
-jq "${mcp_filter}" "${mcp_jq_args[@]}" /etc/opencode/opencode.json \
+# injecting the enabled MCP blocks and any extra instruction files, and pin it
+# so opencode loads exactly this file. With nothing enabled the filter is a
+# no-op passthrough.
+jq "${cfg_filter}" "${cfg_jq_args[@]}" /etc/opencode/opencode.json \
     > "${USER_CFG}/opencode.json"
 export OPENCODE_CONFIG="${USER_CFG}/opencode.json"
 

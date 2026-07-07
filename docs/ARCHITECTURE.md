@@ -142,6 +142,57 @@ disabled:
 `/etc/opencode/disabled.yaml.default` (the entrypoint copies it only if absent),
 so the developer always has a self-documenting menu to edit.
 
+### Extra instruction files (`OPENCODE_EXTRA_INSTRUCTIONS`)
+
+`OPENCODE_EXTRA_INSTRUCTIONS` is a generic hook for surfacing context that
+lives outside the project root. It is a space/comma-separated list of extra
+instruction files (absolute container paths); at boot the entrypoint appends
+each to the generated `opencode.json`'s `instructions` array, which OpenCode
+loads as global context concatenated with the `AGENTS.md` files. Unset ⇒ a
+guaranteed no-op (the entrypoint adds nothing to the config).
+
+The image knows nothing about *why* a path is on that list — it just loads it.
+This is deliberate. The motivating case is the launcher's `--also <path>`
+flag, which bind-mounts extra host folders at `/workspace-extra/<name>`
+(siblings of the repo at `/workspace`). OpenCode runs with `/workspace` as its
+project root and its file tools (list/glob/grep/read) are anchored there, so an
+open-ended search never looks under `/workspace-extra/` and those mounts are
+undiscoverable in practice — the mount is real and readable, but the agent
+never finds it.
+
+The fix is split along the right seam. Teaching *this image* about
+`/workspace-extra` would couple a general-purpose OpenCode environment to one
+launcher's private mount layout. Instead:
+
+- **The launcher owns the whole feature.** It already knows every `--also`
+  mount's name, path, and read-only/read-write status at boot, so it generates
+  a breadcrumb file naming them, mounts it, and sets
+  `OPENCODE_EXTRA_INSTRUCTIONS` to its path. Wording, path convention, and what
+  to advertise all live — and are maintained — in the launcher repo.
+- **The image contributes one stable primitive**: "load the instruction files
+  I'm told to." It never changes as the `--also` feature evolves.
+
+Why the breadcrumb can't just be dropped into a file OpenCode already reads,
+with no image hook at all: OpenCode's automatic instruction locations are
+`/workspace/AGENTS.md` (the developer's real repo — writing there would show up
+in their `git status`) and `~/.config/opencode/AGENTS.md` plus `opencode.json`
+(both **owned by this entrypoint** — the AGENTS.md is a symlink to the bundle,
+and `opencode.json` is regenerated every boot; a file mounted into that dir also
+trips the entrypoint's `chown -R`). So some cooperation from the image is
+unavoidable — `OPENCODE_EXTRA_INSTRUCTIONS` keeps it generic instead of
+`--also`-specific.
+
+`OPENCODE_EXTRA_INSTRUCTIONS` is intentionally **absent from
+`manifest.json` and `.env.example`**, unlike every other env key the container
+reads (see [Config layering](#config-layering) and MAINTAINERS.md). It is
+internal launcher→image plumbing — injected by the launcher's `--also` compose
+overlay, never set by a user — so documenting it would only surface a
+never-touched knob in every `.env` and force the launcher's manifest drift check
+to demand it in the launcher's `.env.example`. The manifest exists to flag
+*user-supplied* keys an older launcher wouldn't know to prompt for; a
+launcher-injected var can't drift that way, so it stays off the manifest by
+design.
+
 ## Plugins
 
 Plugins (`bundle/plugins/<name>/`) are handled differently from the other
