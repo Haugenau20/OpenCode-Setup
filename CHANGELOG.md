@@ -27,10 +27,12 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
-## [Unreleased]
+## [0.0.7] — 2026-07-07
 
-**Action required:** re-pull image. No `.env` change needed. Pairs with a
-launcher change (see below) to make `--also` folders discoverable.
+**Action required:** re-pull image + rebuild squid. If your `.env` still sets
+`ENABLE_SESSION_LOGS`, delete it — it is no longer read. Pairs with a launcher
+change (see `OPENCODE_EXTRA_INSTRUCTIONS` below) to make `--also` folders
+discoverable.
 
 ### Added
 - **`OPENCODE_EXTRA_INSTRUCTIONS`** — a generic hook for surfacing context that
@@ -52,13 +54,6 @@ launcher change (see below) to make `--also` folders discoverable.
   it is internal launcher→image plumbing (injected by the launcher's `--also`
   compose overlay), never a user-set knob, so it is not surfaced as a documented
   env key. New tests cover the parser and the `instructions` jq wiring.
-
-## [0.0.7] — 2026-07-06
-
-**Action required:** re-pull image + rebuild squid. If your `.env` still sets
-`ENABLE_SESSION_LOGS`, delete it — it is no longer read.
-
-### Added
 - **Machine-readable image manifest** (`/etc/opencode/manifest.json`) listing
   every env key the container reads, the MCP servers it ships, and the baked
   plugins — the source the launcher's drift check reads to spot services it
