@@ -193,6 +193,35 @@ to demand it in the launcher's `.env.example`. The manifest exists to flag
 launcher-injected var can't drift that way, so it stays off the manifest by
 design.
 
+### Extra allowed directories (`OPENCODE_EXTRA_ALLOWED_DIRS`)
+
+`OPENCODE_EXTRA_INSTRUCTIONS` makes the `--also` folders *discoverable*; this is
+the other half — it makes them *accessible without a prompt*. OpenCode gates any
+tool call that touches a path outside the `/workspace` project root behind its
+`external_directory` permission, which defaults to `ask`. So even after the
+breadcrumb points the agent at `/workspace-extra/<name>`, the first read/edit
+there pops an "Access external directory" confirmation — every session, every
+folder.
+
+`OPENCODE_EXTRA_ALLOWED_DIRS` is a space/comma-separated list of path globs; at
+boot the entrypoint folds each into the generated `opencode.json`'s
+`permission.external_directory` as `allow`. Only the listed globs are allowed;
+any other out-of-project path still hits the `ask` default. Unset ⇒ a guaranteed
+no-op.
+
+It follows `OPENCODE_EXTRA_INSTRUCTIONS` in every respect: the same generic
+image-side primitive ("allow the globs I'm told to"), set by the launcher's
+`--also` overlay to the mount root it owns (`/workspace-extra/**`), so the image
+never learns the launcher's private mount layout. It is likewise intentionally
+**absent from `manifest.json` and `.env.example`** — launcher→image plumbing, not
+a user knob — for the same reasons given above.
+
+> Access is allow, not the mount's read/write mode. A `--also` folder mounted
+> read-only is still enforced read-only by the kernel; allowing it here only
+> suppresses the access prompt for reads. An agent that tries to *write* a
+> read-only mount gets a filesystem error rather than a permission prompt, which
+> is an acceptable trade for not prompting on every read.
+
 ## Plugins
 
 Plugins (`bundle/plugins/<name>/`) are handled differently from the other

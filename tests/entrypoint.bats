@@ -403,6 +403,51 @@ SRC='source "$ENTRYPOINT"'
   [ "$output" = "{\"instructions\":[\"AGENTS.md\",\"$xi\"]}" ]
 }
 
+# --- extra_allowed_dirs() --------------------------------------------------
+# Generic hook: parses OPENCODE_EXTRA_ALLOWED_DIRS (space/comma-separated) into
+# one glob per line, which main() folds into opencode.json's
+# permission.external_directory as "allow". Sibling of extra_instruction_paths
+# for the *access* half of the --also story; same launcher-injected, container-
+# agnostic contract. Pure helper — takes the raw value as an arg.
+
+@test "extra_allowed_dirs: an unset/empty value prints nothing (guaranteed no-op on the common path)" {
+  run bash -c "$SRC"'; extra_allowed_dirs ""'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run bash -c "$SRC"'; extra_allowed_dirs'   # no arg at all -> local default
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "extra_allowed_dirs: a single glob is echoed verbatim" {
+  run bash -c "$SRC"'; extra_allowed_dirs "/workspace-extra/**"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "/workspace-extra/**" ]
+}
+
+@test "extra_allowed_dirs: a space/comma list splits, one glob per line, empties dropped" {
+  run bash -c "$SRC"'; extra_allowed_dirs "/workspace-extra/**, /data/**   /opt/x/**,,"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '/workspace-extra/**\n/data/**\n/opt/x/**')" ]
+}
+
+@test "extra_allowed_dirs: the external_directory jq wiring is valid and folds in (both absent and present)" {
+  # Guards the exact jq fragment §4d appends to cfg_filter per glob. bash -n
+  # cannot catch a broken jq expression; this does. Absent -> auto-vivifies the
+  # permission.external_directory object; present -> adds the key alongside the
+  # existing ones without dropping them.
+  local xa="/workspace-extra/**"
+  local filter='. | .permission.external_directory[$xa_0] = "allow"'
+
+  run jq -c --arg xa_0 "$xa" "$filter" <<<'{"permission":{"edit":"allow","webfetch":"deny","bash":"allow"}}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "{\"permission\":{\"edit\":\"allow\",\"webfetch\":\"deny\",\"bash\":\"allow\",\"external_directory\":{\"$xa\":\"allow\"}}}" ]
+
+  run jq -c --arg xa_0 "$xa" "$filter" <<<'{"permission":{"external_directory":{"/data/**":"allow"}}}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "{\"permission\":{\"external_directory\":{\"/data/**\":\"allow\",\"/workspace-extra/**\":\"allow\"}}}" ]
+}
+
 # --- direct-execution smoke check ------------------------------------------
 # Not a unit test of a pure function — a regression guard that the
 # main()-wrap refactor didn't change entrypoint.sh's behavior when it's

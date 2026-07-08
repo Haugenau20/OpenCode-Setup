@@ -31,8 +31,8 @@ up. The vocabulary:
 
 **Action required:** re-pull image + rebuild squid. If your `.env` still sets
 `ENABLE_SESSION_LOGS`, delete it — it is no longer read. Pairs with a launcher
-change (see `OPENCODE_EXTRA_INSTRUCTIONS` below) to make `--also` folders
-discoverable.
+change (see the `OPENCODE_EXTRA_*` notes below) to make `--also` folders both
+discoverable and accessible without a per-access prompt.
 
 ### Added
 - **`OPENCODE_EXTRA_INSTRUCTIONS`** — a generic hook for surfacing context that
@@ -54,6 +54,19 @@ discoverable.
   it is internal launcher→image plumbing (injected by the launcher's `--also`
   compose overlay), never a user-set knob, so it is not surfaced as a documented
   env key. New tests cover the parser and the `instructions` jq wiring.
+- **`OPENCODE_EXTRA_ALLOWED_DIRS`** — the *access* companion to the hook above.
+  OpenCode gates any tool call touching a path outside the `/workspace` project
+  root behind its `external_directory` permission (default `ask`), so the
+  launcher's `--also` mounts were now discoverable via the breadcrumb but still
+  popped an "Access external directory" confirmation on every read/edit under
+  them. This space/comma-separated list of path globs is folded into the
+  generated `opencode.json`'s `permission.external_directory` as `allow` at boot
+  (only the listed globs; every other out-of-project path keeps the `ask`
+  default). Same generic, launcher-injected contract as
+  `OPENCODE_EXTRA_INSTRUCTIONS` — the launcher sets it to `/workspace-extra/**`
+  and the image never learns the mount layout — and likewise kept out of
+  `manifest.json`/`.env.example`. New tests cover the parser and the
+  `external_directory` jq wiring.
 - **Machine-readable image manifest** (`/etc/opencode/manifest.json`) listing
   every env key the container reads, the MCP servers it ships, and the baked
   plugins — the source the launcher's drift check reads to spot services it
