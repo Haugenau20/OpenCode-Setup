@@ -147,8 +147,13 @@ open `http://localhost:1<OPENCODE_PORT>` (e.g. `http://localhost:14096`) in your
 browser. `docker-compose.yml` derives the viewer port from `OPENCODE_PORT` by
 prepending a `1`, so it stays clear of the `4096+N` main-port range and is
 unique per instance; the `oc-publish` sidecar forwards it the same way it
-forwards `OPENCODE_PORT` for the main server. See `.env.example` for the
-`PTY_MAX_BUFFER_LINES` knob.
+forwards `OPENCODE_PORT` for the main server.
+
+A bundled companion skill, `pty-sessions`, is gated on the plugin (via a
+`.requires` file — see [`docs/ADDING_SKILLS.md`](docs/ADDING_SKILLS.md)), so
+enabling `opencode-pty` also teaches the agent when to reach for these tools
+instead of the blocking one-shot `bash` tool. It is absent when the plugin is
+off.
 
 
 ## MCP servers (Bitbucket, GitLab, Jira, JFrog & Confluence)

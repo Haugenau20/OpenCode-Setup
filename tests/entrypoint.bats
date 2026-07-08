@@ -463,6 +463,94 @@ SRC='source "$ENTRYPOINT"'
   [ "$output" = "{\"permission\":{\"external_directory\":{\"/data/**\":\"allow\",\"/workspace-extra/**\":\"allow\"}}}" ]
 }
 
+# --- mcp_credentials_present() --------------------------------------------
+# The single predicate deciding whether a first-party MCP server is "up" — used
+# both to wire it into opencode.json (§4b) and to gate its companion *-fetch
+# skill (§3a builds MCPS_ENABLED_SET from it). Pure: reads <SVC>_* from the
+# environment, returns 0/1. Inline `VAR=val fn` assignments scope the creds to
+# just that call.
+
+@test "mcp_credentials_present: API-only service (needs_user=0) is up with BASE_URL + PAT" {
+  run bash -c "$SRC"'; JIRA_BASE_URL=http://j JIRA_PAT=t mcp_credentials_present jira 0'
+  [ "$status" -eq 0 ]
+}
+
+@test "mcp_credentials_present: missing PAT means not up" {
+  run bash -c "$SRC"'; JIRA_BASE_URL=http://j mcp_credentials_present jira 0'
+  [ "$status" -ne 0 ]
+}
+
+@test "mcp_credentials_present: missing BASE_URL means not up" {
+  run bash -c "$SRC"'; JIRA_PAT=t mcp_credentials_present jira 0'
+  [ "$status" -ne 0 ]
+}
+
+@test "mcp_credentials_present: DISABLE_<SVC>_MCP=1 forces not up even with full creds" {
+  run bash -c "$SRC"'; JIRA_BASE_URL=http://j JIRA_PAT=t DISABLE_JIRA_MCP=1 mcp_credentials_present jira 0'
+  [ "$status" -ne 0 ]
+}
+
+@test "mcp_credentials_present: git-remote service (needs_user=1) also requires <SVC>_USER" {
+  run bash -c "$SRC"'; BITBUCKET_BASE_URL=http://b BITBUCKET_PAT=t mcp_credentials_present bitbucket 1'
+  [ "$status" -ne 0 ]   # user missing -> not up
+  run bash -c "$SRC"'; BITBUCKET_BASE_URL=http://b BITBUCKET_PAT=t BITBUCKET_USER=me mcp_credentials_present bitbucket 1'
+  [ "$status" -eq 0 ]   # user present -> up
+}
+
+@test "mcp_credentials_present: an entirely unconfigured service is not up" {
+  run bash -c "$SRC"'; mcp_credentials_present confluence 0'
+  [ "$status" -ne 0 ]
+}
+
+# --- skill_gate_ok() ------------------------------------------------------
+# Reads a skill's `.requires` file and decides whether it should be linked,
+# consulting the PLUGINS_ENABLED_SET / MCPS_ENABLED_SET globals main() §3a builds
+# (space-padded strings). One `plugin=`/`mcp=` line per file; fails closed.
+
+@test "skill_gate_ok: plugin gate passes when the plugin is in the enabled set" {
+  local f="$BATS_TEST_TMPDIR/.requires"; printf 'plugin=opencode-pty\n' > "$f"
+  run bash -c "$SRC"'; PLUGINS_ENABLED_SET=" superpowers opencode-pty "; skill_gate_ok "'"$f"'"'
+  [ "$status" -eq 0 ]
+}
+
+@test "skill_gate_ok: plugin gate fails when the plugin is not enabled" {
+  local f="$BATS_TEST_TMPDIR/.requires"; printf 'plugin=opencode-pty\n' > "$f"
+  run bash -c "$SRC"'; PLUGINS_ENABLED_SET=" superpowers "; skill_gate_ok "'"$f"'"'
+  [ "$status" -ne 0 ]
+}
+
+@test "skill_gate_ok: mcp gate passes/fails on MCPS_ENABLED_SET membership" {
+  local f="$BATS_TEST_TMPDIR/.requires"; printf 'mcp=jira\n' > "$f"
+  run bash -c "$SRC"'; MCPS_ENABLED_SET=" jira gitlab "; skill_gate_ok "'"$f"'"'
+  [ "$status" -eq 0 ]
+  run bash -c "$SRC"'; MCPS_ENABLED_SET=" gitlab "; skill_gate_ok "'"$f"'"'
+  [ "$status" -ne 0 ]
+}
+
+@test "skill_gate_ok: whole-word match — a name that is only a substring does not satisfy the gate" {
+  local f="$BATS_TEST_TMPDIR/.requires"; printf 'plugin=pty\n' > "$f"
+  run bash -c "$SRC"'; PLUGINS_ENABLED_SET=" opencode-pty "; skill_gate_ok "'"$f"'"'
+  [ "$status" -ne 0 ]
+}
+
+@test "skill_gate_ok: a trailing CR is tolerated (CRLF-authored .requires)" {
+  local f="$BATS_TEST_TMPDIR/.requires"; printf 'plugin=opencode-pty\r\n' > "$f"
+  run bash -c "$SRC"'; PLUGINS_ENABLED_SET=" opencode-pty "; skill_gate_ok "'"$f"'"'
+  [ "$status" -eq 0 ]
+}
+
+@test "skill_gate_ok: comment and blank lines are ignored" {
+  local f="$BATS_TEST_TMPDIR/.requires"; printf '# needs the plugin\n\nplugin=opencode-pty\n' > "$f"
+  run bash -c "$SRC"'; PLUGINS_ENABLED_SET=" opencode-pty "; skill_gate_ok "'"$f"'"'
+  [ "$status" -eq 0 ]
+}
+
+@test "skill_gate_ok: an unknown key fails closed" {
+  local f="$BATS_TEST_TMPDIR/.requires"; printf 'wat=whatever\n' > "$f"
+  run bash -c "$SRC"'; PLUGINS_ENABLED_SET=" opencode-pty "; MCPS_ENABLED_SET=" jira "; skill_gate_ok "'"$f"'"'
+  [ "$status" -ne 0 ]
+}
+
 # --- direct-execution smoke check ------------------------------------------
 # Not a unit test of a pure function — a regression guard that the
 # main()-wrap refactor didn't change entrypoint.sh's behavior when it's

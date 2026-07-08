@@ -51,10 +51,27 @@ up. The vocabulary:
   the `4096+N` range a multi-instance launcher uses and is unique per instance
   without any per-instance config. The `oc-publish` sidecar now runs two `socat`
   listeners instead of one, forwarding that derived port to the container just
-  like it already does for `OPENCODE_PORT`. `PTY_MAX_BUFFER_LINES` (default
-  `50000`) caps the output kept per PTY session buffer. No squid/allowlist
+  like it already does for `OPENCODE_PORT`. No squid/allowlist
   changes — the viewer is inbound-only, served entirely inside the compose
   network.
+- **`pty-sessions` skill** — a bundled skill that teaches the agent when and how
+  to use the `opencode-pty` tools (spawn/read/write background & interactive
+  processes) rather than the blocking one-shot `bash` tool. It is **gated on the
+  plugin**: present only when `opencode-pty` is in `ENABLED_PLUGINS`.
+- **Conditional bundle content (`.requires` gate).** A bundled skill can declare
+  a provider dependency in a `.requires` file next to its `SKILL.md`
+  (`plugin=<name>` or `mcp=<name>`); the entrypoint links it only when that
+  provider is active, and retracts it on a later boot if the provider is turned
+  off. See [`docs/ADDING_SKILLS.md`](docs/ADDING_SKILLS.md).
+
+### Changed
+- **The `*-fetch` skills now appear only when their service is up.** Each of
+  `bitbucket-fetch` / `jira-fetch` / `gitlab-fetch` / `jfrog-fetch` /
+  `confluence-fetch` carries an `mcp=<service>` gate, so a service that has no
+  credentials in `.env` (or is force-disabled via `DISABLE_<SVC>_MCP=1`) no
+  longer surfaces a companion skill for a server that isn't running. The gate
+  reuses the exact predicate that decides whether the MCP server is wired into
+  the config, so the two can never disagree.
 
 ## [0.0.7] — 2026-07-07
 
