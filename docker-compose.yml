@@ -25,8 +25,13 @@ services:
       NO_PROXY: "localhost,127.0.0.1,::1,opencode,squid,rag,.local"
       no_proxy: "localhost,127.0.0.1,::1,opencode,squid,rag,.local"
       OPENCODE_INTERNAL_PORT: "4096"
-      # opencode-pty viewer must bind non-loopback so oc-publish can reach it.
+      # opencode-pty viewer: force the plugin to bind non-loopback (so oc-publish
+      # can reach it) and to a FIXED port, so its bind matches the port published
+      # below. Both derive from ${PTY_WEB_PORT:-4097}; without pinning the port
+      # here the plugin defaults to a random port that oc-publish never forwards.
+      # Override the port by setting PTY_WEB_PORT in .env.
       PTY_WEB_HOSTNAME: "0.0.0.0"
+      PTY_WEB_PORT: "${PTY_WEB_PORT:-4097}"
     volumes:
       # :z relabels the bind-mounted repo for SELinux (shared label). Without it,
       # an enforcing host denies the container access to /workspace. Named volumes
