@@ -159,10 +159,17 @@ apply_policy_env() {
 extra_instruction_paths() {
     local raw="${1:-}"
     raw="${raw//,/ }"
-    local p
+    local p was_noglob=0
+    # noglob for the same reason as extra_allowed_dirs below: split on IFS only,
+    # never filename-expand, so a path containing a glob char passes through
+    # literally. (Today's inputs are plain file paths, but the sibling hook made
+    # this footgun concrete — keep both split idioms identical and safe.)
+    case $- in *f*) was_noglob=1 ;; esac
+    set -f
     for p in ${raw}; do
         [ -n "${p}" ] && printf '%s\n' "${p}"
     done
+    [ "${was_noglob}" = 1 ] || set +f
 }
 
 # Split OPENCODE_EXTRA_ALLOWED_DIRS into one glob per line, dropping empties.
@@ -181,10 +188,22 @@ extra_instruction_paths() {
 extra_allowed_dirs() {
     local raw="${1:-}"
     raw="${raw//,/ }"
-    local p
+    local p was_noglob=0
+    # These entries are glob PATTERNS (e.g. /workspace-extra/**), and the --also
+    # mounts they name already exist when the entrypoint runs (compose bind-mounts
+    # them before PID 1). So an unguarded `for p in ${raw}` would *filename-expand*
+    # each pattern against the real filesystem — /workspace-extra/** collapses to
+    # the literal leaf dirs (/workspace-extra/demo …), dropping the trailing
+    # wildcard opencode needs to match files underneath, and the permission never
+    # covers them. Disable globbing so the split is word-splitting ONLY; the
+    # pattern reaches jq verbatim. Restore the prior noglob state so the helper
+    # has no side effect on its caller.
+    case $- in *f*) was_noglob=1 ;; esac
+    set -f
     for p in ${raw}; do
         [ -n "${p}" ] && printf '%s\n' "${p}"
     done
+    [ "${was_noglob}" = 1 ] || set +f
 }
 
 main() {

@@ -431,6 +431,21 @@ SRC='source "$ENTRYPOINT"'
   [ "$output" = "$(printf '/workspace-extra/**\n/data/**\n/opt/x/**')" ]
 }
 
+@test "extra_allowed_dirs: a glob survives verbatim even when matching paths exist on disk (noglob regression)" {
+  # The boot-time footgun: the --also mounts a pattern names already exist when
+  # the entrypoint runs, so an unguarded `for p in ${raw}` filename-expands
+  # /workspace-extra/** into the leaf dirs and silently drops the wildcard
+  # opencode matches on. Create a real matching tree and prove the pattern is
+  # emitted literally, not expanded to $d/demo + $d/other.
+  local d
+  d="$(mktemp -d)"
+  mkdir -p "$d/demo" "$d/other"
+  run bash -c "$SRC"'; extra_allowed_dirs "'"$d"'/**"'
+  rm -rf "$d"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$d/**" ]
+}
+
 @test "extra_allowed_dirs: the external_directory jq wiring is valid and folds in (both absent and present)" {
   # Guards the exact jq fragment §4d appends to cfg_filter per glob. bash -n
   # cannot catch a broken jq expression; this does. Absent -> auto-vivifies the
