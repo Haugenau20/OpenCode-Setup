@@ -45,7 +45,8 @@ array entries, which we don't use):
   `pty_read`, `pty_list`, `pty_kill` — for driving background processes in
   real pseudo-terminals, plus a local web viewer started via the
   `/pty-open-background-spy` slash command. Ask the agent what tools it has,
-  or run that command and open the published `PTY_WEB_PORT`.
+  or run that command and open the published viewer port (derived from
+  `OPENCODE_PORT` as `1<OPENCODE_PORT>`, e.g. `14096`).
 
 ## Turning a plugin on or off (developer)
 

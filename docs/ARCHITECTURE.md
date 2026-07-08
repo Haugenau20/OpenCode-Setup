@@ -85,9 +85,11 @@ egress), Docker Engine 28+ refuses to bind published host ports for it. The
 `oc-publish` sidecar (a minimal `socat` forwarder using the squid image) sits
 on the non-internal `oc_publish` bridge and forwards
 `localhost:4096 -> opencode:4096` over `oc_proxy` (plus, when the opencode-pty
-plugin is enabled, `localhost:${PTY_WEB_PORT} -> opencode:${PTY_WEB_PORT}` for
-its web viewer — the sidecar runs one `socat` listener per port). This gives the
-host reachable ports without granting opencode any network egress.
+plugin is enabled, a second listener for its web viewer on the port
+`docker-compose.yml` derives from `OPENCODE_PORT` by prepending a `1` — e.g.
+`14096` — so it stays clear of the `4096+N` main-port range and is unique per
+instance). This gives the host reachable ports without granting opencode any
+network egress.
 
 The desktop app is installed by the developer on their own host (it is an
 Electron app). It connects to `http://localhost:${OPENCODE_PORT}` exactly

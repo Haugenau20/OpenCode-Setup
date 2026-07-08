@@ -143,10 +143,12 @@ column in `ENABLED_PLUGINS`.
 pseudo-terminals, plus a live terminal viewer served from inside the
 container. After enabling it in `ENABLED_PLUGINS` and restarting, run
 `/pty-open-background-spy` in the TUI to start the viewer's local server, then
-open `http://localhost:${PTY_WEB_PORT:-4097}` in your browser — the
-`oc-publish` sidecar forwards that port the same way it forwards
-`OPENCODE_PORT` for the main server. See `.env.example` for the
-`PTY_WEB_PORT`/`PTY_MAX_BUFFER_LINES` knobs.
+open `http://localhost:1<OPENCODE_PORT>` (e.g. `http://localhost:14096`) in your
+browser. `docker-compose.yml` derives the viewer port from `OPENCODE_PORT` by
+prepending a `1`, so it stays clear of the `4096+N` main-port range and is
+unique per instance; the `oc-publish` sidecar forwards it the same way it
+forwards `OPENCODE_PORT` for the main server. See `.env.example` for the
+`PTY_MAX_BUFFER_LINES` knob.
 
 
 ## MCP servers (Bitbucket, GitLab, Jira, JFrog & Confluence)

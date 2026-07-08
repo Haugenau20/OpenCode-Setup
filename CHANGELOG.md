@@ -29,8 +29,8 @@ up. The vocabulary:
 
 ## [Unreleased]
 
-**Action required:** re-pull image (once released) + edit .env if you want the
-new plugin's viewer (`ENABLED_PLUGINS`, `PTY_WEB_PORT`).
+**Action required:** re-pull image (once released) + set `ENABLED_PLUGINS` in
+.env if you want the new plugin (its web-viewer port is derived automatically).
 
 ### Added
 - **`opencode-pty` plugin** (opt-in via `ENABLED_PLUGINS`, off by default) —
@@ -46,12 +46,15 @@ new plugin's viewer (`ENABLED_PLUGINS`, `PTY_WEB_PORT`).
 - **The `opencode-pty` web viewer is reachable from the host.** The plugin
   binds its server to `PTY_WEB_HOSTNAME` (fixed to `0.0.0.0` in
   `docker-compose.yml`, since the plugin's own default — `::1` — is
-  loopback-only) on `PTY_WEB_PORT` (new `.env` knob, default `4097`). The
-  `oc-publish` sidecar now runs two `socat` listeners instead of one, and also
-  forwards `127.0.0.1:${PTY_WEB_PORT}` to the container, exactly like it
-  already does for `OPENCODE_PORT`. `PTY_MAX_BUFFER_LINES` (default `50000`)
-  caps the output kept per PTY session buffer. No squid/allowlist changes —
-  the viewer is inbound-only, served entirely inside the compose network.
+  loopback-only) on a port `docker-compose.yml` derives from `OPENCODE_PORT` by
+  prepending a `1` (main `4096` → viewer `14096`), so the viewer sits clear of
+  the `4096+N` range a multi-instance launcher uses and is unique per instance
+  without any per-instance config. The `oc-publish` sidecar now runs two `socat`
+  listeners instead of one, forwarding that derived port to the container just
+  like it already does for `OPENCODE_PORT`. `PTY_MAX_BUFFER_LINES` (default
+  `50000`) caps the output kept per PTY session buffer. No squid/allowlist
+  changes — the viewer is inbound-only, served entirely inside the compose
+  network.
 
 ## [0.0.7] — 2026-07-07
 
