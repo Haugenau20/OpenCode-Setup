@@ -159,10 +159,51 @@ apply_policy_env() {
 extra_instruction_paths() {
     local raw="${1:-}"
     raw="${raw//,/ }"
-    local p
+    local p was_noglob=0
+    # noglob for the same reason as extra_allowed_dirs below: split on IFS only,
+    # never filename-expand, so a path containing a glob char passes through
+    # literally. (Today's inputs are plain file paths, but the sibling hook made
+    # this footgun concrete — keep both split idioms identical and safe.)
+    case $- in *f*) was_noglob=1 ;; esac
+    set -f
     for p in ${raw}; do
         [ -n "${p}" ] && printf '%s\n' "${p}"
     done
+    [ "${was_noglob}" = 1 ] || set +f
+}
+
+# Split OPENCODE_EXTRA_ALLOWED_DIRS into one glob per line, dropping empties.
+# The sibling of extra_instruction_paths for the *access* half of the same
+# out-of-project story: a space/comma-separated list of path globs that main()
+# folds into opencode.json's `permission.external_directory` as "allow". opencode
+# gates any tool touching a path outside the /workspace project root behind that
+# permission, which defaults to "ask" — so without this the agent is prompted on
+# every read/edit under the launcher's --also mounts (/workspace-extra/<name>),
+# defeating the whole point of surfacing them via OPENCODE_EXTRA_INSTRUCTIONS.
+# Same contract as that var in every respect: generic, launcher-injected, and
+# deliberately kept off manifest.json/.env.example (see that helper's note) —
+# the image never learns the launcher's /workspace-extra layout, it just allows
+# whatever globs it is handed. Guaranteed no-op when unset. Do not add it to the
+# manifest.
+extra_allowed_dirs() {
+    local raw="${1:-}"
+    raw="${raw//,/ }"
+    local p was_noglob=0
+    # These entries are glob PATTERNS (e.g. /workspace-extra/**), and the --also
+    # mounts they name already exist when the entrypoint runs (compose bind-mounts
+    # them before PID 1). So an unguarded `for p in ${raw}` would *filename-expand*
+    # each pattern against the real filesystem — /workspace-extra/** collapses to
+    # the literal leaf dirs (/workspace-extra/demo …), dropping the trailing
+    # wildcard opencode needs to match files underneath, and the permission never
+    # covers them. Disable globbing so the split is word-splitting ONLY; the
+    # pattern reaches jq verbatim. Restore the prior noglob state so the helper
+    # has no side effect on its caller.
+    case $- in *f*) was_noglob=1 ;; esac
+    set -f
+    for p in ${raw}; do
+        [ -n "${p}" ] && printf '%s\n' "${p}"
+    done
+    [ "${was_noglob}" = 1 ] || set +f
 }
 
 main() {
@@ -366,10 +407,28 @@ while IFS= read -r xi; do
     log "extra instructions: + ${xi}"
 done < <(extra_instruction_paths "${OPENCODE_EXTRA_INSTRUCTIONS:-}")
 
+# ---- 4d. Extra allowed directories (generic hook) ----------------------------
+# Fold any globs in OPENCODE_EXTRA_ALLOWED_DIRS into opencode.json's
+# `permission.external_directory` as "allow" (see extra_allowed_dirs above).
+# external_directory defaults to "ask", so without this opencode prompts on
+# every access to a path outside /workspace — including the --also mounts the
+# breadcrumb from §4c just told the agent to read. Only the listed globs are
+# allowed; anything else still hits the "ask" default (no "*" rule is added).
+# Guaranteed no-op when the var is unset; the launcher sets it (in its --also
+# overlay) to the mount root it owns, keeping the path convention on its side.
+xa_n=0
+while IFS= read -r xa; do
+    [ -n "${xa}" ] || continue
+    cfg_filter="${cfg_filter} | .permission.external_directory[\$xa_${xa_n}] = \"allow\""
+    cfg_jq_args+=(--arg "xa_${xa_n}" "${xa}")
+    xa_n=$((xa_n + 1))
+    log "extra allowed dir: + ${xa}"
+done < <(extra_allowed_dirs "${OPENCODE_EXTRA_ALLOWED_DIRS:-}")
+
 # Ship the config into the global config dir (alongside bundle symlinks),
-# injecting the enabled MCP blocks and any extra instruction files, and pin it
-# so opencode loads exactly this file. With nothing enabled the filter is a
-# no-op passthrough.
+# injecting the enabled MCP blocks, any extra instruction files, and any extra
+# allowed directories, and pin it so opencode loads exactly this file. With
+# nothing enabled the filter is a no-op passthrough.
 jq "${cfg_filter}" "${cfg_jq_args[@]}" /etc/opencode/opencode.json \
     > "${USER_CFG}/opencode.json"
 export OPENCODE_CONFIG="${USER_CFG}/opencode.json"
