@@ -107,6 +107,12 @@ Work through this ladder in order:
    If `opencode-publish-<slug>` is missing from `docker ps`, the sidecar is
    not running: `docker compose up -d oc-publish`.
 
+   The same sidecar also forwards the opencode-pty web viewer port
+   (`PTY_WEB_PORT`, default 4097) when that plugin is enabled. If you can't
+   reach `http://localhost:4097`, run the same checks with `4097` in place of
+   `4096`, and confirm the viewer's server is started (`/pty-open-background-spy`
+   in the TUI) — it does not listen until then.
+
    If the sidecar is up but you get connection refused, check it can reach
    opencode:
 

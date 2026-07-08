@@ -29,7 +29,6 @@
     {"key": "HOST_UID", "required": false},
     {"key": "HOST_GID", "required": false},
     {"key": "PTY_WEB_PORT", "required": false},
-    {"key": "PTY_WEB_HOSTNAME", "required": false},
     {"key": "PTY_MAX_BUFFER_LINES", "required": false}
   ],
   "mcps": ["bitbucket", "gitlab", "jira", "jfrog", "confluence"],

@@ -65,6 +65,7 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
+        trap 'kill 0' TERM INT
         socat TCP-LISTEN:4096,fork,reuseaddr TCP:opencode:4096 &
         socat TCP-LISTEN:${PTY_WEB_PORT:-4097},fork,reuseaddr TCP:opencode:${PTY_WEB_PORT:-4097} &
         wait
