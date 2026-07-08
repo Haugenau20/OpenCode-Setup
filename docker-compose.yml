@@ -25,6 +25,8 @@ services:
       NO_PROXY: "localhost,127.0.0.1,::1,opencode,squid,rag,.local"
       no_proxy: "localhost,127.0.0.1,::1,opencode,squid,rag,.local"
       OPENCODE_INTERNAL_PORT: "4096"
+      # opencode-pty viewer must bind non-loopback so oc-publish can reach it.
+      PTY_WEB_HOSTNAME: "0.0.0.0"
     volumes:
       # :z relabels the bind-mounted repo for SELinux (shared label). Without it,
       # an enforcing host denies the container access to /workspace. Named volumes
@@ -47,19 +49,28 @@ services:
 
   # Publisher sidecar: opencode runs on internal-only networks (no egress), so
   # modern Docker won't bind its published port on the host. This minimal socat
-  # forwarder lives on a normal (non-internal) bridge — so ITS port can be
-  # published — plus oc_proxy, so it can reach opencode. It only forwards
-  # 4096 -> opencode:4096; it is not an open proxy and grants opencode no egress.
+  # forwarder lives on a normal (non-internal) bridge — so ITS ports can be
+  # published — plus oc_proxy, so it can reach opencode. It runs two socat
+  # listeners: 4096 -> opencode:4096 (the OpenCode server) and
+  # PTY_WEB_PORT -> opencode:PTY_WEB_PORT (the opencode-pty web viewer, only
+  # live when that plugin is enabled and its server is started via
+  # /pty-open-background-spy). It is not an open proxy and grants opencode no
+  # egress.
   oc-publish:
     image: ${IMAGE_REGISTRY:-opencode-workplace}-squid:${IMAGE_TAG:-local}
     container_name: opencode-publish-${PROJECT_SLUG:-default}
     hostname: oc-publish
     depends_on:
       - opencode
-    entrypoint: ["socat"]
-    command: ["TCP-LISTEN:4096,fork,reuseaddr", "TCP:opencode:4096"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        socat TCP-LISTEN:4096,fork,reuseaddr TCP:opencode:4096 &
+        socat TCP-LISTEN:${PTY_WEB_PORT:-4097},fork,reuseaddr TCP:opencode:${PTY_WEB_PORT:-4097} &
+        wait
     ports:
       - "127.0.0.1:${OPENCODE_PORT:-4096}:4096"
+      - "127.0.0.1:${PTY_WEB_PORT:-4097}:${PTY_WEB_PORT:-4097}"
     networks:
       - oc_proxy
       - oc_publish

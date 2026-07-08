@@ -27,6 +27,32 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
+## [Unreleased]
+
+**Action required:** re-pull image (once released) + edit .env if you want the
+new plugin's viewer (`ENABLED_PLUGINS`, `PTY_WEB_PORT`).
+
+### Added
+- **`opencode-pty` plugin** (opt-in via `ENABLED_PLUGINS`, off by default) —
+  interactive PTY management: model-callable tools (`pty_spawn`, `pty_write`,
+  `pty_read`, `pty_list`, `pty_kill`) for driving background processes in real
+  pseudo-terminals, plus a live web viewer started from the TUI via
+  `/pty-open-background-spy`. The published npm package already ships a fully
+  built `dist/` (plugin + a self-contained Vite-bundled web UI) and its
+  `bun-pty` dependency ships a prebuilt native library loaded via Bun FFI, so
+  nothing is compiled at image-build time — only `npm install --omit=dev` and
+  a straight vendor of `node_modules`, same offline-ready shape as the other
+  baked plugins.
+- **The `opencode-pty` web viewer is reachable from the host.** The plugin
+  binds its server to `PTY_WEB_HOSTNAME` (fixed to `0.0.0.0` in
+  `docker-compose.yml`, since the plugin's own default — `::1` — is
+  loopback-only) on `PTY_WEB_PORT` (new `.env` knob, default `4097`). The
+  `oc-publish` sidecar now runs two `socat` listeners instead of one, and also
+  forwards `127.0.0.1:${PTY_WEB_PORT}` to the container, exactly like it
+  already does for `OPENCODE_PORT`. `PTY_MAX_BUFFER_LINES` (default `50000`)
+  caps the output kept per PTY session buffer. No squid/allowlist changes —
+  the viewer is inbound-only, served entirely inside the compose network.
+
 ## [0.0.7] — 2026-07-07
 
 **Action required:** re-pull image + rebuild squid. If your `.env` still sets

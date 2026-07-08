@@ -44,10 +44,12 @@ RUN update-ca-certificates
 FROM base AS plugins-build
 
 # Pin every plugin. superpowers/workspace publish no usable tags, so they pin by
-# commit SHA; DCP pins by release tag. Update deliberately and re-test on bumps.
+# commit SHA; DCP pins by release tag; opencode-pty pins by its npm package
+# version. Update deliberately and re-test on bumps.
 ARG SUPERPOWERS_REF=6fd4507
 ARG DCP_REF=v3.1.12
 ARG WORKSPACE_REF=4451c688ebfc2cab2eb7bdb4a6a87ad017ea24db
+ARG PTY_REF=0.3.6
 
 WORKDIR /build
 RUN mkdir -p /staging/plugins
@@ -98,6 +100,21 @@ RUN git clone https://github.com/kdcokenny/opencode-workspace.git workspace \
     && npm install --no-audit --no-fund \
           @opencode-ai/plugin@1.16.2 @opencode-ai/sdk@1.16.2 \
           zod@3.23.8 unique-names-generator@4.7.1 jsonc-parser@3.3.1
+
+# opencode-pty — interactive PTY sessions + a local web viewer. Published npm
+# tarball ships a fully built dist/ (plugin + self-contained web UI) and
+# bun-pty ships a prebuilt native lib (librust_pty.so, loaded via Bun FFI),
+# so NOTHING is compiled here — just vendor node_modules. Entry resolves its
+# deps (bun-pty/open) by walking up to the vendored top-level node_modules.
+RUN mkdir -p /build/pty && cd /build/pty \
+    && npm init -y >/dev/null \
+    && npm install --no-audit --no-fund --omit=dev \
+          opencode-pty@${PTY_REF} bun-pty@0.4.10 open@11.0.0 \
+    && mkdir -p /staging/plugins/opencode-pty \
+    && cp -r node_modules /staging/plugins/opencode-pty/node_modules \
+    && printf 'opencode-pty.js=node_modules/opencode-pty/dist/index.js\n' \
+          > /staging/plugins/opencode-pty/entries \
+    && printf '%s\n' "${PTY_REF}" > /staging/plugins/opencode-pty/.baked-version
 
 # ---- MCP build: vendor first-party MCP server deps, offline-ready ------------
 # The first-party MCP servers (Bitbucket, GitLab, Jira, JFrog) are committed

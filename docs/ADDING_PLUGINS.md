@@ -16,6 +16,7 @@ the pins themselves are set in [`../opencode/Dockerfile`](../opencode/Dockerfile
 | `superpowers` | Skills library — brainstorming, writing-plans, systematic-debugging, TDD, requesting/receiving code review, and more. | [obra/superpowers](https://github.com/obra/superpowers) |
 | `dcp` | Dynamic context pruning — silently trims stale tool output from the context window to save tokens. | [Opencode-DCP/opencode-dynamic-context-pruning](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning) |
 | `opencode-workspace` | `plan_save`/`plan_read` planning tools + background-agent delegation (async sub-agents). | [kdcokenny/opencode-workspace](https://github.com/kdcokenny/opencode-workspace) |
+| `opencode-pty` | Interactive PTY management: run background processes in real pseudo-terminals, stream/regex-filter their output, plus a local web viewer. | [shekohex/opencode-pty](https://github.com/shekohex/opencode-pty) |
 
 Run **`/plugins`** in the TUI for the live catalog and current on/off state.
 
@@ -40,6 +41,11 @@ array entries, which we don't use):
   > **Caveat:** dcp relies on `experimental.chat.messages.transform`, which is
   > deprecated upstream. It works today but is the plugin most likely to break
   > on an OpenCode bump — re-test it whenever you change `OPENCODE_VERSION`.
+- **opencode-pty** adds model-callable tools — `pty_spawn`, `pty_write`,
+  `pty_read`, `pty_list`, `pty_kill` — for driving background processes in
+  real pseudo-terminals, plus a local web viewer started via the
+  `/pty-open-background-spy` slash command. Ask the agent what tools it has,
+  or run that command and open the published `PTY_WEB_PORT`.
 
 ## Turning a plugin on or off (developer)
 
@@ -130,3 +136,11 @@ A plugin is a clean fit only if **all** of these hold:
 
 If a plugin needs live egress to function, it does **not** belong here — flag it
 for a deliberate allowlist decision instead.
+
+> **Deliberate exception:** `opencode-pty` bends two of the rules above — it
+> runs a local web server (its viewer) and its `open` dependency assumes a
+> desktop browser. Both are fine here: the server binds only inside the
+> container/compose network (no egress, nothing dials out), and the
+> browser-open call silently no-ops in this headless container — the
+> developer reaches the viewer through the port `oc-publish` forwards to the
+> host instead of a browser opening automatically.
