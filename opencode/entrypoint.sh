@@ -288,7 +288,7 @@ USER_CFG=/home/dev/.config/opencode
 BUNDLE=/opt/opencode/bundle
 DISABLED_FILE="${USER_CFG}/disabled.yaml"
 
-mkdir -p "${USER_CFG}"/{agents,skills,commands,mcp,plugin}
+mkdir -p "${USER_CFG}"/{agents,skills,commands,mcp,plugin,themes}
 
 # Seed the developer's on/off switch file on first boot. It is the single
 # control surface for toggling bundled content (and the menu the `/plugins`
@@ -335,7 +335,7 @@ for entry in ${MCP_SERVICES}; do
         && MCPS_ENABLED_SET="${MCPS_ENABLED_SET} ${entry%%:*}"
 done
 
-for kind in agents skills commands mcp; do
+for kind in agents skills commands mcp themes; do
     symlink_bundle "${kind}"
 done
 
@@ -351,6 +351,20 @@ if [ -f "${BUNDLE}/AGENTS.md" ]; then
         log "skip shadowed:  AGENTS.md"
     else
         ln -sfn "${BUNDLE}/AGENTS.md" "${dst}"
+    fi
+fi
+
+# TUI config (theme, keybinds, etc). OpenCode reads ~/.config/opencode/tui.json
+# as the global TUI config, lowest-precedence under any project-level tui.json.
+# Same shadow rule as AGENTS.md: a real file the developer put there themselves
+# wins over the bundle symlink.
+if [ -f "${BUNDLE}/tui.json" ]; then
+    dst="${USER_CFG}/tui.json"
+    [ -L "${dst}" ] && [ ! -e "${dst}" ] && rm -f "${dst}"   # drop stale link
+    if [ -e "${dst}" ] && [ ! -L "${dst}" ]; then
+        log "skip shadowed:  tui.json"
+    else
+        ln -sfn "${BUNDLE}/tui.json" "${dst}"
     fi
 fi
 

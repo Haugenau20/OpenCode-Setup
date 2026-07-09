@@ -4,17 +4,19 @@
 # it to your LIVE switch file at ~/.config/opencode/disabled.yaml (inside the
 # container). Editing this template has no effect on a running stack.
 #
-# This file toggles the bundled agents / skills / commands / mcp ONLY. They ship
-# ENABLED — list a name under the matching key to turn it OFF, then restart.
+# This file toggles the bundled agents / skills / commands / mcp / themes ONLY.
+# They ship ENABLED — list a name under the matching key to turn it OFF, then
+# restart.
 #
 # PLUGINS ARE NOT CONTROLLED HERE. Enable them with ENABLED_PLUGINS in your .env
 # on the host (e.g. ENABLED_PLUGINS=superpowers dcp), then restart. Run
 # `/plugins` in the TUI for the live plugin catalog. See docs/ADDING_PLUGINS.md.
 
-# --- Bundled agents/skills/commands/mcp: ON by default ------------------------
+# --- Bundled agents/skills/commands/mcp/themes: ON by default -----------------
 # Add a name to a list below to turn that item OFF.
 disabled:
   agents:  []
   skills:  []
   commands: []
   mcp:     []
+  themes:  []

@@ -106,7 +106,7 @@ SRC='source "$ENTRYPOINT"'
   # This is the exact file the entrypoint seeds on first boot — pin that the
   # all-empty default really does yield an empty disabled set for every kind.
   run bash -c 'DISABLED_FILE="'"$REPO_ROOT"'/opencode/disabled.yaml.default"; '"$SRC"'
-    for k in agents skills commands mcp; do
+    for k in agents skills commands mcp themes; do
       disabled_for "$k"
     done'
   [ "$status" -eq 0 ]

@@ -118,6 +118,20 @@ config dir (`~/.config/opencode/AGENTS.md`); a real file there shadows the
 bundle symlink. To add repo-specific rules instead, just commit an `AGENTS.md`
 to the repo root — both load together.
 
+## TUI config and themes (`tui.json`)
+
+The bundle ships `tui.json` (theme selection, keybinds, etc.) and a `themes/`
+directory of custom theme JSON files, e.g. `themes/corp.json`. The entrypoint
+symlinks both into `~/.config/opencode/` the same way as `AGENTS.md` — `tui.json`
+directly, and each file under `themes/` treated like the `agents`/`skills`/
+`commands`/`mcp` kinds (shadow-safe, and toggleable via `disabled.yaml`'s
+`themes:` list).
+
+To use your own theme instead, either drop a real `tui.json` into the user-layer
+config dir (shadows the bundle symlink), or add a JSON file under
+`~/.config/opencode/themes/` and point `tui.json`'s `theme` field at its
+filename (without `.json`).
+
 ## One repo only
 
 Standard OpenCode location: `<repo>/.opencode/`. This is checked in with the
