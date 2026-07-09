@@ -1,0 +1,158 @@
+{
+  "$schema": "https://opencode.ai/theme.json",
+  "defs": {
+    "corpLightBackground": "#F3F3F2",
+    "corpLightFooter": "#373532",
+    "corpLightContainer1": "#E3E3E1",
+    "corpLightContainer2": "#FFFFFF",
+    "corpLightContainer3": "#E0DCD6",
+
+    "corpDarkBackground": "#373532",
+    "corpDarkContainer1": "#5F5D5B",
+    "corpDarkContainer2": "#878684",
+    "corpDarkPrimaryText": "#F3F3F2",
+
+    "corpCtaYellow": "#FAB900",
+    "corpCtaBlue": "#004C97",
+    "corpInvalid": "#DA291C",
+    "corpValid": "#24A148",
+    "corpCaution": "#FF6700",
+    "corpWarning": "#FFE100"
+  },
+  "theme": {
+    "primary": {
+      "dark": "corpCtaBlue",
+      "light": "corpCtaBlue"
+    },
+    "secondary": {
+      "dark": "corpDarkContainer2",
+      "light": "corpLightContainer3"
+    },
+    "accent": {
+      "dark": "corpCtaYellow",
+      "light": "corpCtaYellow"
+    },
+
+    "error": "corpInvalid",
+    "warning": "corpWarning",
+    "success": "corpValid",
+    "info": "corpCtaBlue",
+
+    "text": {
+      "dark": "corpDarkPrimaryText",
+      "light": "corpLightFooter"
+    },
+    "textMuted": {
+      "dark": "corpDarkContainer2",
+      "light": "corpDarkContainer1"
+    },
+
+    "background": {
+      "dark": "corpDarkBackground",
+      "light": "corpLightBackground"
+    },
+    "backgroundPanel": {
+      "dark": "corpDarkContainer1",
+      "light": "corpLightContainer1"
+    },
+    "backgroundElement": {
+      "dark": "corpDarkContainer2",
+      "light": "corpLightContainer2"
+    },
+
+    "border": {
+      "dark": "corpDarkContainer1",
+      "light": "corpLightContainer1"
+    },
+    "borderActive": "corpCtaYellow",
+    "borderSubtle": {
+      "dark": "corpDarkContainer1",
+      "light": "corpLightContainer3"
+    },
+
+    "diffAdded": "corpValid",
+    "diffRemoved": "corpInvalid",
+    "diffContext": {
+      "dark": "corpDarkPrimaryText",
+      "light": "corpLightFooter"
+    },
+    "diffHunkHeader": "corpCtaYellow",
+
+    "diffAddedBg": {
+      "dark": "#1E4730",
+      "light": "#DFF4E7"
+    },
+    "diffRemovedBg": {
+      "dark": "#5A211D",
+      "light": "#F9DEDB"
+    },
+    "diffContextBg": {
+      "dark": "corpDarkBackground",
+      "light": "corpLightBackground"
+    },
+    "diffLineNumber": {
+      "dark": "corpDarkContainer2",
+      "light": "corpDarkContainer1"
+    },
+    "diffAddedLineNumberBg": {
+      "dark": "#1E4730",
+      "light": "#DFF4E7"
+    },
+    "diffRemovedLineNumberBg": {
+      "dark": "#5A211D",
+      "light": "#F9DEDB"
+    },
+
+    "markdownText": {
+      "dark": "corpDarkPrimaryText",
+      "light": "corpLightFooter"
+    },
+    "markdownHeading": "corpCtaYellow",
+    "markdownLink": "corpCtaBlue",
+    "markdownLinkText": "corpCtaBlue",
+    "markdownCode": {
+      "dark": "corpDarkPrimaryText",
+      "light": "corpLightFooter"
+    },
+    "markdownBlockQuote": {
+      "dark": "corpDarkContainer2",
+      "light": "corpDarkContainer1"
+    },
+    "markdownEmph": "corpCtaYellow",
+    "markdownStrong": {
+      "dark": "corpDarkPrimaryText",
+      "light": "corpLightFooter"
+    },
+    "markdownHorizontalRule": {
+      "dark": "corpDarkContainer2",
+      "light": "corpLightContainer3"
+    },
+    "markdownListItem": "corpCtaYellow",
+    "markdownListEnumeration": "corpCtaYellow",
+    "markdownImage": "corpCtaBlue",
+    "markdownImageText": "corpCtaBlue",
+    "markdownCodeBlock": {
+      "dark": "corpDarkPrimaryText",
+      "light": "corpLightFooter"
+    },
+
+    "syntaxComment": {
+      "dark": "corpDarkContainer2",
+      "light": "corpDarkContainer1"
+    },
+    "syntaxKeyword": "corpCtaYellow",
+    "syntaxFunction": "corpCtaBlue",
+    "syntaxVariable": {
+      "dark": "corpDarkPrimaryText",
+      "light": "corpLightFooter"
+    },
+    "syntaxString": "corpValid",
+    "syntaxNumber": "corpCaution",
+    "syntaxType": "corpCtaBlue",
+    "syntaxOperator": "corpWarning",
+    "syntaxPunctuation": {
+      "dark": "corpDarkPrimaryText",
+      "light": "corpLightFooter"
+    }
+  }
+}
