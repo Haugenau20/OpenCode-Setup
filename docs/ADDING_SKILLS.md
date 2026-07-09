@@ -70,6 +70,41 @@ builds the merged config.
 > via the `ENABLED_PLUGINS` variable in `.env`. See
 > [`ADDING_PLUGINS.md`](ADDING_PLUGINS.md).
 
+## Conditional skills (gate on a plugin or MCP)
+
+A bundled skill that only makes sense when a specific plugin or MCP server is
+active can declare that dependency, and the entrypoint links it **only when that
+provider is up** — otherwise the skill is silently left out (and retracted on the
+next boot if the provider is later turned off). This keeps the agent from seeing
+a companion skill for tools that don't exist in the current configuration.
+
+Drop a `.requires` file next to the skill's `SKILL.md`, one gate per line:
+
+```
+# opencode/bundle/skills/pty-sessions/.requires
+plugin=opencode-pty
+```
+
+```
+# opencode/bundle/skills/jira-fetch/.requires
+mcp=jira
+```
+
+- **`plugin=<name>`** — linked only when `<name>` is listed in `ENABLED_PLUGINS`.
+- **`mcp=<name>`** — linked only when that MCP server is actually up: its
+  credentials are present in `.env` **and** it isn't force-disabled via
+  `DISABLE_<SVC>_MCP=1`. This is the very same check that decides whether the
+  server gets wired into `opencode.json`, so a skill can never advertise a
+  service that isn't running.
+
+Multiple lines are ANDed; an unknown key fails closed (the skill is skipped); no
+`.requires` file means unconditional (the default). The gate applies to skills
+only — agents and commands are flat `.md` files and can't carry one.
+
+The shipped `*-fetch` skills use `mcp=…` so they appear only when their service
+is configured, and `pty-sessions` uses `plugin=opencode-pty` so it appears only
+when that plugin is enabled.
+
 ## Global house rules (`AGENTS.md`)
 
 The bundle ships an `AGENTS.md` of workplace-wide instructions (e.g. "route

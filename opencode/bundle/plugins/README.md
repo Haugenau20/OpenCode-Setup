@@ -66,3 +66,4 @@ All OFF by default (opt-in via `ENABLED_PLUGINS`); pinned versions live in
 | `superpowers` | Skills library (brainstorming, writing-plans, systematic-debugging, TDD, code review). Zero deps, zero runtime egress. | [obra/superpowers](https://github.com/obra/superpowers) |
 | `dcp` | Dynamic context pruning — trims stale tool output from the context window to save tokens. | [Opencode-DCP/opencode-dynamic-context-pruning](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning) |
 | `opencode-workspace` | `plan_save`/`plan_read` tools + background-agent delegation (async sub-agents). | [kdcokenny/opencode-workspace](https://github.com/kdcokenny/opencode-workspace) |
+| `opencode-pty` | Interactive PTY management: run background processes in real pseudo-terminals, stream/regex-filter their output, plus a local web viewer. | [shekohex/opencode-pty](https://github.com/shekohex/opencode-pty) |

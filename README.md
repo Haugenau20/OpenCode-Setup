@@ -127,6 +127,7 @@ column in `ENABLED_PLUGINS`.
 | `superpowers` | Skills library: brainstorming, writing-plans, systematic-debugging, TDD, requesting/receiving code review, and more. | [obra/superpowers](https://github.com/obra/superpowers) | `v5.1.0` (`6fd4507`) |
 | `dcp` | Dynamic context pruning — silently trims stale tool output from the context window to save tokens (no user-facing tool). | [Opencode-DCP/opencode-dynamic-context-pruning](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning) | `v3.1.12` |
 | `opencode-workspace` | `plan_save`/`plan_read` planning tools + background-agent delegation (async sub-agents). Only the two container-safe plugins are shipped. | [kdcokenny/opencode-workspace](https://github.com/kdcokenny/opencode-workspace) | `4451c68` |
+| `opencode-pty` | Interactive PTY management: run background processes in real pseudo-terminals, stream/regex-filter their output, plus a local web viewer. | [shekohex/opencode-pty](https://github.com/shekohex/opencode-pty) | `0.3.6` |
 
 > [!WARNING]
 > **Do not enable `opencode-workspace` if you use Qwen.** The extra tools and
@@ -134,6 +135,25 @@ column in `ENABLED_PLUGINS`.
 > fails with `AI_APICallError: Failed to communicate with the upstream service`.
 > Other models (e.g. MiniMax, Gemma) are unaffected. Leave this plugin disabled
 > when working with Qwen.
+
+### `opencode-pty`'s web viewer
+
+`opencode-pty` adds model-callable tools (`pty_spawn`/`pty_write`/`pty_read`/
+`pty_list`/`pty_kill`) for driving background processes in real
+pseudo-terminals, plus a live terminal viewer served from inside the
+container. After enabling it in `ENABLED_PLUGINS` and restarting, run
+`/pty-open-background-spy` in the TUI to start the viewer's local server, then
+open `http://localhost:1<OPENCODE_PORT>` (e.g. `http://localhost:14096`) in your
+browser. `docker-compose.yml` derives the viewer port from `OPENCODE_PORT` by
+prepending a `1`, so it stays clear of the `4096+N` main-port range and is
+unique per instance; the `oc-publish` sidecar forwards it the same way it
+forwards `OPENCODE_PORT` for the main server.
+
+A bundled companion skill, `pty-sessions`, is gated on the plugin (via a
+`.requires` file — see [`docs/ADDING_SKILLS.md`](docs/ADDING_SKILLS.md)), so
+enabling `opencode-pty` also teaches the agent when to reach for these tools
+instead of the blocking one-shot `bash` tool. It is absent when the plugin is
+off.
 
 
 ## MCP servers (Bitbucket, GitLab, Jira, JFrog & Confluence)

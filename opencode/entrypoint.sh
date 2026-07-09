@@ -72,15 +72,66 @@ disabled_for() {
     ' "${DISABLED_FILE}"
 }
 
+# Is a first-party MCP server configured and not force-disabled? This is the
+# SINGLE source of truth for "is service X up", used both to gate that service's
+# companion skill (via skill_gate_ok below) and to actually wire the server into
+# opencode.json (§4b) — so the two can never disagree. Reads <SVC>_BASE_URL /
+# <SVC>_PAT / <SVC>_USER (only when needs_user=1, i.e. it's also a git remote) /
+# DISABLE_<SVC>_MCP straight from the environment. Pure (no globals) → testable.
+mcp_credentials_present() {
+    local svc="$1" needs_user="$2"
+    local SVC="${svc^^}"
+    local base_var="${SVC}_BASE_URL" pat_var="${SVC}_PAT" disable_var="DISABLE_${SVC}_MCP"
+    [ -n "${!base_var:-}" ]          || return 1
+    [ -n "${!pat_var:-}" ]           || return 1
+    [ "${!disable_var:-0}" != "1" ]  || return 1
+    if [ "${needs_user}" = "1" ]; then
+        local user_var="${SVC}_USER"
+        [ -n "${!user_var:-}" ]      || return 1
+    fi
+    return 0
+}
+
+# Should a bundled item carrying a `.requires` file be linked? The file lists one
+# `plugin=<name>` or `mcp=<name>` per line; the item is linked only if EVERY named
+# provider is active — the plugin is in PLUGINS_ENABLED_SET, or the MCP is in
+# MCPS_ENABLED_SET (both computed in main() §3a before the symlink loop runs).
+# No `.requires` file means unconditional (callers test that before calling here).
+# Unknown keys fail closed. Space-padding makes the grep a whole-word test.
+skill_gate_ok() {
+    local file="$1" key val
+    while IFS='=' read -r key val; do
+        val="${val%$'\r'}"
+        case "${key}" in
+            ''|\#*) continue ;;
+            plugin) printf ' %s ' "${PLUGINS_ENABLED_SET:-}" | grep -q " ${val} " || return 1 ;;
+            mcp)    printf ' %s ' "${MCPS_ENABLED_SET:-}"    | grep -q " ${val} " || return 1 ;;
+            *) log "skill_gate: unknown key '${key}' in ${file} — failing closed"; return 1 ;;
+        esac
+    done < "${file}"
+    return 0
+}
+
 symlink_bundle() {
     local kind="$1"
     local src="${BUNDLE}/${kind}"
     local dst="${USER_CFG}/${kind}"
     [ -d "${src}" ] || return 0
 
-    # Drop dangling symlinks left by an earlier image/bundle layout. The config
-    # dir is a persistent volume, so stale links survive rebuilds otherwise.
-    find "${dst}" -maxdepth 1 -xtype l -delete 2>/dev/null || true
+    # Rebuild from scratch each boot (same approach as the plugin linker in §3b):
+    # first drop every symlink WE manage — any link under dst pointing into the
+    # bundle, valid or dangling — so an item that became disabled, gated-off (its
+    # provider was turned off), or removed since the last boot doesn't linger on
+    # the persistent config volume. Real files a developer dropped in, and any
+    # symlinks pointing outside the bundle, point away from ${BUNDLE}/ and are
+    # left untouched. (Supersedes the old dangling-only cleanup, which couldn't
+    # retract a still-valid link whose item should no longer be present.)
+    if [ -d "${dst}" ]; then
+        for link in "${dst}"/*; do
+            [ -L "${link}" ] || continue
+            case "$(readlink "${link}")" in "${BUNDLE}/"*) rm -f "${link}" ;; esac
+        done
+    fi
 
     local disabled
     disabled="$(disabled_for "${kind}" | tr '\n' ' ')"
@@ -88,13 +139,21 @@ symlink_bundle() {
     for entry in "${src}"/*; do
         [ -e "${entry}" ] || continue
         local name; name="$(basename "${entry}")"
-        # Skip if disabled or already shadowed by a user file.
+        # Skip if disabled, shadowed by a user file, or gated off by .requires.
         if printf ' %s ' "${disabled}" | grep -q " ${name%.*} "; then
             log "skip disabled: ${kind}/${name}"
             continue
         fi
         if [ -e "${dst}/${name}" ] && [ ! -L "${dst}/${name}" ]; then
             log "skip shadowed:  ${kind}/${name}"
+            continue
+        fi
+        # A skill dir may carry a `.requires` file naming the plugin/MCP it
+        # complements — link it only when that provider is active. Flat-file
+        # kinds (agents/commands) can't hold one, so this is skills-only in
+        # practice. No file → unconditional.
+        if [ -f "${entry}/.requires" ] && ! skill_gate_ok "${entry}/.requires"; then
+            log "skip (provider off): ${kind}/${name}"
             continue
         fi
         ln -sfn "${entry}" "${dst}/${name}"
@@ -240,6 +299,42 @@ if [ ! -f "${DISABLED_FILE}" ] && [ -f /etc/opencode/disabled.yaml.default ]; th
     log "seeded ${DISABLED_FILE} (edit it to toggle bundled content; see /plugins)"
 fi
 
+# ---- 3a. Provider-enablement sets (gate conditional bundle content) -----------
+# Some bundled skills only make sense alongside a specific plugin or MCP server
+# and are dead weight without it. Such a skill carries a `.requires` file
+# (`plugin=<name>` / `mcp=<name>`); symlink_bundle links it only when that
+# provider is active. Compute the "active" sets HERE, before the symlink loop
+# below consults them, so a skill for a disabled plugin or an unconfigured MCP is
+# simply never linked (and is retracted on the next boot if it was linked before).
+
+# Enabled plugins: the normalized ENABLED_PLUGINS list (§3b reuses this exact
+# value to do the actual plugin symlinking). Space-separated; membership is
+# tested by padding both sides with spaces so a name matches only as a whole word.
+PLUGINS_ENABLED_SET="${ENABLED_PLUGINS:-}"
+PLUGINS_ENABLED_SET="${PLUGINS_ENABLED_SET//,/ }"
+PLUGINS_ENABLED_SET="${PLUGINS_ENABLED_SET//\"/}"
+PLUGINS_ENABLED_SET="${PLUGINS_ENABLED_SET//\'/}"
+
+# One row per first-party MCP service: "<name>:<needs_user>". needs_user=1 means
+# the service is also a git remote and authenticates HTTP Basic, so it also
+# requires <SVC>_USER (Bitbucket, GitLab); needs_user=0 means API-only — no git
+# transport, PAT as a Bearer token, no username (Jira, JFrog, Confluence). Every
+# service still gates on <SVC>_BASE_URL + <SVC>_PAT + DISABLE_<SVC>_MCP != 1.
+# This table is the ONE source both this gate and the §4b config-wiring loop
+# walk. Adding service #6 is: drop the server dir under mcp-servers/, add its
+# squid allowlist conf, add one row here, add its keys to .env.example AND
+# opencode/manifest.json (see MAINTAINERS.md).
+MCP_SERVICES="bitbucket:1 jira:0 gitlab:1 jfrog:0 confluence:0"
+
+# Enabled MCP servers: those whose credentials are present and not disabled —
+# the SAME predicate §4b uses to actually wire them in (mcp_credentials_present),
+# so a skill's gate can never disagree with whether the server is really up.
+MCPS_ENABLED_SET=""
+for entry in ${MCP_SERVICES}; do
+    mcp_credentials_present "${entry%%:*}" "${entry#*:}" \
+        && MCPS_ENABLED_SET="${MCPS_ENABLED_SET} ${entry%%:*}"
+done
+
 for kind in agents skills commands mcp; do
     symlink_bundle "${kind}"
 done
@@ -289,16 +384,12 @@ if [ -d "${PLUGIN_SRC}" ]; then
         done
     fi
 
-    # Parse ENABLED_PLUGINS: tolerate commas and stray quotes leaked from .env.
-    enabled="${ENABLED_PLUGINS:-}"
-    enabled="${enabled//,/ }"
-    enabled="${enabled//\"/}"
-    enabled="${enabled//\'/}"
-
+    # ENABLED_PLUGINS was already normalized (commas/quotes stripped) into
+    # PLUGINS_ENABLED_SET in §3a; reuse it as the single source of truth.
     for dir in "${PLUGIN_SRC}"/*/; do
         [ -d "${dir}" ] || continue
         name="$(basename "${dir}")"
-        if ! printf ' %s ' "${enabled}" | grep -q " ${name} "; then
+        if ! printf ' %s ' "${PLUGINS_ENABLED_SET}" | grep -q " ${name} "; then
             log "plugin off: ${name} (enable via ENABLED_PLUGINS in .env; see /plugins)"
             continue
         fi
@@ -349,38 +440,24 @@ MCP_DIR=/opt/opencode/mcp-servers
 cfg_filter='.'
 cfg_jq_args=()
 
-# One row per service: "<name>:<needs_user>". needs_user=1 means the service
-# is also a git remote and authenticates HTTP Basic, so it additionally
-# requires <SVC>_USER (Bitbucket, GitLab); needs_user=0 means it's API-only —
-# no git transport, PAT presented as a Bearer token, no username involved
-# (Jira, JFrog, Confluence). Every service still gates on <SVC>_BASE_URL +
-# <SVC>_PAT + DISABLE_<SVC>_MCP != 1. Adding service #6 is: drop the server
-# dir under mcp-servers/, add its squid allowlist conf, add one row here, add
-# its keys to .env.example AND opencode/manifest.json (see MAINTAINERS.md).
-MCP_SERVICES="bitbucket:1 jira:0 gitlab:1 jfrog:0 confluence:0"
-
+# MCP_SERVICES (the service table) and MCPS_ENABLED_SET were built in §3a. Walk
+# the same table to wire each ENABLED server into the config, deciding on/off
+# with the same mcp_credentials_present predicate so the config wiring and the
+# skill gating can never diverge.
 for entry in ${MCP_SERVICES}; do
     svc="${entry%%:*}"
     needs_user="${entry#*:}"
     SVC="${svc^^}"
 
-    base_var="${SVC}_BASE_URL";     base="${!base_var:-}"
-    pat_var="${SVC}_PAT";           pat="${!pat_var:-}"
-    disable_var="DISABLE_${SVC}_MCP"; disable="${!disable_var:-0}"
+    base_var="${SVC}_BASE_URL"; base="${!base_var:-}"
 
     # hint mirrors the old hand-written "set X/Y/Z to enable" messages, e.g.
     # "BITBUCKET_BASE_URL/USER/PAT" vs. "JIRA_BASE_URL/PAT".
-    user_ok=1
     hint="${SVC}_BASE_URL"
-    if [ "${needs_user}" = "1" ]; then
-        user_var="${SVC}_USER"; user="${!user_var:-}"
-        [ -n "${user}" ] || user_ok=0
-        hint="${hint}/USER"
-    fi
+    [ "${needs_user}" = "1" ] && hint="${hint}/USER"
     hint="${hint}/PAT"
 
-    if [ -n "${base}" ] && [ "${user_ok}" = "1" ] && [ -n "${pat}" ] \
-       && [ "${disable}" != "1" ]; then
+    if mcp_credentials_present "${svc}" "${needs_user}"; then
         arg_name="p_${svc}"
         cfg_filter="${cfg_filter} | .mcp.${svc} = {\"type\":\"local\",\"command\":[\"node\",\$${arg_name}],\"enabled\":true}"
         cfg_jq_args+=(--arg "${arg_name}" "${MCP_DIR}/${svc}/index.js")

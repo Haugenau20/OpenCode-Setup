@@ -23,6 +23,11 @@ Do this, then stop:
    - `opencode-workspace` — `plan_save`/`plan_read` planning tools plus
      background-agent delegation (async sub-agents).
      Source: https://github.com/kdcokenny/opencode-workspace
+   - `opencode-pty` — interactive PTY management: run background processes in
+     real pseudo-terminals, stream/regex-filter their output (pty_spawn /
+     pty_write / pty_read / pty_list / pty_kill), plus a local web viewer
+     (/pty-open-background-spy).
+     Source: https://github.com/shekohex/opencode-pty
    (If a baked plugin isn't in this map, show its name with "(no description).")
 4. Finish with one line on how to toggle: set `ENABLED_PLUGINS` in `.env` on the
    host (space- or comma-separated, e.g. `ENABLED_PLUGINS=superpowers dcp`) and

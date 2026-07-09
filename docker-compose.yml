@@ -7,7 +7,7 @@ services:
       context: .
       dockerfile: opencode/Dockerfile
       args:
-        OPENCODE_VERSION: ${OPENCODE_VERSION:-1.17.11}
+        OPENCODE_VERSION: ${OPENCODE_VERSION:-1.17.15}
     container_name: opencode-${PROJECT_SLUG:-default}
     hostname: opencode
     depends_on:
@@ -25,6 +25,15 @@ services:
       NO_PROXY: "localhost,127.0.0.1,::1,opencode,squid,rag,.local"
       no_proxy: "localhost,127.0.0.1,::1,opencode,squid,rag,.local"
       OPENCODE_INTERNAL_PORT: "4096"
+      # opencode-pty viewer: force the plugin to bind non-loopback (so oc-publish
+      # can reach it) and to a fixed, per-instance port DERIVED from OPENCODE_PORT
+      # by prepending a '1' (main 4096 -> viewer 14096). This keeps the viewer far
+      # from the 4096+N block a multi-instance launcher hands out for main ports,
+      # and makes it unique per instance for free — so the plugin never falls back
+      # to a random port oc-publish couldn't forward, and two stacks never collide
+      # on the viewer's host port. (Assumes OPENCODE_PORT stays 4 digits.)
+      PTY_WEB_HOSTNAME: "0.0.0.0"
+      PTY_WEB_PORT: "1${OPENCODE_PORT:-4096}"
     volumes:
       # :z relabels the bind-mounted repo for SELinux (shared label). Without it,
       # an enforcing host denies the container access to /workspace. Named volumes
@@ -47,19 +56,29 @@ services:
 
   # Publisher sidecar: opencode runs on internal-only networks (no egress), so
   # modern Docker won't bind its published port on the host. This minimal socat
-  # forwarder lives on a normal (non-internal) bridge — so ITS port can be
-  # published — plus oc_proxy, so it can reach opencode. It only forwards
-  # 4096 -> opencode:4096; it is not an open proxy and grants opencode no egress.
+  # forwarder lives on a normal (non-internal) bridge — so ITS ports can be
+  # published — plus oc_proxy, so it can reach opencode. It runs two socat
+  # listeners: 4096 -> opencode:4096 (the OpenCode server) and
+  # 1${OPENCODE_PORT} -> opencode:1${OPENCODE_PORT} (e.g. 14096, the opencode-pty
+  # web viewer, only live when that plugin is enabled and its server is started
+  # via /pty-open-background-spy). It is not an open proxy and grants opencode no
+  # egress.
   oc-publish:
     image: ${IMAGE_REGISTRY:-opencode-workplace}-squid:${IMAGE_TAG:-local}
     container_name: opencode-publish-${PROJECT_SLUG:-default}
     hostname: oc-publish
     depends_on:
       - opencode
-    entrypoint: ["socat"]
-    command: ["TCP-LISTEN:4096,fork,reuseaddr", "TCP:opencode:4096"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        trap 'kill 0' TERM INT
+        socat TCP-LISTEN:4096,fork,reuseaddr TCP:opencode:4096 &
+        socat TCP-LISTEN:1${OPENCODE_PORT:-4096},fork,reuseaddr TCP:opencode:1${OPENCODE_PORT:-4096} &
+        wait
     ports:
       - "127.0.0.1:${OPENCODE_PORT:-4096}:4096"
+      - "127.0.0.1:1${OPENCODE_PORT:-4096}:1${OPENCODE_PORT:-4096}"
     networks:
       - oc_proxy
       - oc_publish

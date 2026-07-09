@@ -30,5 +30,5 @@
     {"key": "HOST_GID", "required": false}
   ],
   "mcps": ["bitbucket", "gitlab", "jira", "jfrog", "confluence"],
-  "plugins": ["superpowers", "dcp", "opencode-workspace"]
+  "plugins": ["superpowers", "dcp", "opencode-workspace", "opencode-pty"]
 }

@@ -47,9 +47,9 @@ canonical reference; if the code disagrees with this document, fix one of them.
 │  │         │ (reserved for future MCP/RAG sidecars)             │ │
 │  │                                                              │ │
 │  │  ┌──────────────┐  oc_proxy                                  │ │
-│  │  │  oc-publish  │◄──── TCP:opencode:4096                     │ │
-│  │  │  socat fwd   │  oc_publish (non-internal)                 │ │
-│  │  │  :4096 pub.  │◄──────────────────── host :4096            │ │
+│  │  │  oc-publish  │◄──── TCP:opencode:4096 & :PTY_WEB_PORT     │ │
+│  │  │  2x socat fwd│  oc_publish (non-internal)                 │ │
+│  │  │ :4096+:PTY   │◄──────────── host :4096 & :PTY_WEB_PORT    │ │
 │  │  └──────────────┘                                            │ │
 │  │                                                               │ │
 │  │  Volumes:                                                     │ │
@@ -67,7 +67,7 @@ canonical reference; if the code disagrees with this document, fix one of them.
 | `oc_internal`  | yes        | opencode (+future)   | No egress. Reserved for the RAG MCP server and any other internal-only sidecars we add later. |
 | `oc_proxy`     | yes        | opencode, squid, oc-publish | The only path opencode has to the outside world. |
 | `oc_egress`    | no         | squid                | Squid's view of the internet.        |
-| `oc_publish`   | no         | oc-publish           | Lets the publisher sidecar expose opencode's port to the host without giving opencode egress. |
+| `oc_publish`   | no         | oc-publish           | Lets the publisher sidecar expose opencode's ports to the host without giving opencode egress. |
 
 Because `oc_internal` and `oc_proxy` are both `internal: true`, opencode has
 no default route to the internet. The only way out is to make an HTTP request
@@ -84,8 +84,12 @@ Because `opencode` is attached only to `internal: true` networks (to prevent
 egress), Docker Engine 28+ refuses to bind published host ports for it. The
 `oc-publish` sidecar (a minimal `socat` forwarder using the squid image) sits
 on the non-internal `oc_publish` bridge and forwards
-`localhost:4096 -> opencode:4096` over `oc_proxy`. This gives the host a
-reachable port without granting opencode any network egress.
+`localhost:4096 -> opencode:4096` over `oc_proxy` (plus, when the opencode-pty
+plugin is enabled, a second listener for its web viewer on the port
+`docker-compose.yml` derives from `OPENCODE_PORT` by prepending a `1` — e.g.
+`14096` — so it stays clear of the `4096+N` main-port range and is unique per
+instance). This gives the host reachable ports without granting opencode any
+network egress.
 
 The desktop app is installed by the developer on their own host (it is an
 Electron app). It connects to `http://localhost:${OPENCODE_PORT}` exactly
