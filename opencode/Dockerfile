@@ -3,7 +3,7 @@
 # ---- Base: OS + tools + corp CA ----------------------------------------------
 FROM debian:bookworm-slim AS base
 
-ARG OPENCODE_VERSION=1.17.11
+ARG OPENCODE_VERSION=1.17.15
 ARG NODE_MAJOR=22
 ARG TZ=Europe/Copenhagen
 
@@ -136,7 +136,7 @@ FROM base AS runtime
 # both here so their values are actually available to THIS stage's RUN/LABEL
 # instructions (without this, OPENCODE_VERSION silently evaluated empty below,
 # and the OCI label MAINTAINERS.md promises never carried the real version).
-ARG OPENCODE_VERSION=1.17.11
+ARG OPENCODE_VERSION=1.17.15
 # IMAGE_VERSION is the opencode-workplace image's OWN release version (semver
 # tag pushed to Artifactory, e.g. 0.0.7 — see MAINTAINERS.md "Cutting a
 # release"), distinct from OPENCODE_VERSION (the upstream opencode CLI it

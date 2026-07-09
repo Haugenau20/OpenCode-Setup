@@ -7,7 +7,7 @@ services:
       context: .
       dockerfile: opencode/Dockerfile
       args:
-        OPENCODE_VERSION: ${OPENCODE_VERSION:-1.17.11}
+        OPENCODE_VERSION: ${OPENCODE_VERSION:-1.17.15}
     container_name: opencode-${PROJECT_SLUG:-default}
     hostname: opencode
     depends_on:

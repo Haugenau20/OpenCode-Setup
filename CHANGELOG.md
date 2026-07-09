@@ -27,10 +27,11 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
-## [Unreleased]
+## [0.0.8] — 2026-07-09
 
-**Action required:** re-pull image (once released) + set `ENABLED_PLUGINS` in
-.env if you want the new plugin (its web-viewer port is derived automatically).
+**Action required:** re-pull image. Opt in to `opencode-pty` via
+`ENABLED_PLUGINS`; if you want its web viewer, also update your launcher/compose
+(the `oc-publish` sidecar now publishes the derived viewer port too — see below).
 
 ### Added
 - **`opencode-pty` plugin** (opt-in via `ENABLED_PLUGINS`, off by default) —
@@ -72,6 +73,8 @@ up. The vocabulary:
   longer surfaces a companion skill for a server that isn't running. The gate
   reuses the exact predicate that decides whether the MCP server is wired into
   the config, so the two can never disagree.
+- **Bumped the bundled OpenCode CLI to `1.17.15`** (from `1.17.11`). The baked
+  plugins were re-tested against it with no apparent errors.
 
 ## [0.0.7] — 2026-07-07
 
