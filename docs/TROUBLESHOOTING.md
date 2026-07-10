@@ -198,6 +198,69 @@ upstream default has been fixed and the manual step is no longer needed.
 That's the safety gate doing its job. See
 [ALLOWING_GIT_PUSH.md](ALLOWING_GIT_PUSH.md).
 
+## git prompts for `Username for 'https://…:8443'` at startup (or on fetch/push)
+
+**Symptom.** One user — not everyone — gets an interactive git prompt right
+before the TUI attaches (or on the first `fetch`/`pull`/`push`):
+
+```
+Username for 'https://bitbucket.internal.example:8443':
+```
+
+…even though `BITBUCKET_BASE_URL` is plain HTTP on `:7990` and `:8443` appears
+**nowhere** in `.env` or this repo.
+
+**This is a local, per-user problem — not a fault in this setup.** Two facts
+pin it down:
+
+1. **The `:8443` HTTPS URL comes from the Bitbucket server, not from us.**
+   Bitbucket has a canonical *Base URL* (Admin → Server settings), and corp
+   installs are usually fronted by a reverse proxy that terminates TLS. When a
+   client reaches the raw HTTP connector (`http://…:7990`), the server answers
+   `301 Location: https://…:8443` to force its canonical HTTPS address. git
+   follows the redirect and then has to authenticate against the new URL — so
+   the port and scheme in the prompt are the server's, not anything you chose.
+
+2. **It's a *git* prompt, so it comes from the repo's remote — not from
+   `BITBUCKET_BASE_URL`.** That env var is read only by the Bitbucket MCP
+   server (the REST client), which sends its `Authorization` header
+   programmatically and can never produce a terminal `Username for …` prompt.
+   A `Username for …` prompt is always git talking to a git remote, and that
+   remote lives in the `.git/config` of the repo you bind-mount at
+   `/workspace` (`REPO_PATH`) — set **per user, on their host, at clone time**.
+
+So the user whose clone points at `http://…:7990` hits the redirect; users who
+cloned over SSH (`ssh://git@…`) or the canonical `https://…:8443` never do.
+(For the op to run at all he also has `ALLOW_REMOTE_GIT=1`; otherwise
+`git-guard` blocks fetch/pull/push outright.)
+
+**Confirm it:**
+
+```bash
+# What is the repo's remote actually pointing at?
+git -C <REPO_PATH> remote -v
+
+# Prove the server-side redirect (look for "Location: https://…:8443"):
+curl -sSI "http://bitbucket.internal.example:7990/scm/PROJ/repo.git/info/refs?service=git-upload-pack"
+
+# Rule out a host-side url.insteadOf rewrite on his machine:
+git -C <REPO_PATH> config --get-regexp '^url\.'
+```
+
+**Fix it** — point the remote at the same canonical address everyone else uses:
+
+```bash
+# SSH (sidesteps HTTP auth entirely, matches the README clone example):
+git -C <REPO_PATH> remote set-url origin ssh://git@bitbucket.internal.example/scm/PROJ/repo.git
+# …or the canonical HTTPS endpoint, so there is no redirect:
+git -C <REPO_PATH> remote set-url origin https://bitbucket.internal.example:8443/scm/PROJ/repo.git
+```
+
+Also make sure that user's `.env` has the full trio — `BITBUCKET_USER` **and**
+`BITBUCKET_PAT`, not just `BITBUCKET_BASE_URL`. The in-container credential
+helper (`entrypoint.sh` §6) is only generated when both are present; without it
+git can't answer the prompt on its own even for a correctly-pointed remote.
+
 ## "x509: certificate signed by unknown authority"
 
 The corp CA wasn't baked into the image. The image needs to be rebuilt
