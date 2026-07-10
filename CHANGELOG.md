@@ -56,10 +56,12 @@ optional `BITBUCKET_LEGACY_URL`.
   for the REST API but is the source of the redirect prompt above.
 
 ### Added
-- **Squid `dns_search`** — the Squid service now carries a DNS search domain
-  (`corp.local`; set it to your internal domain) so bare internal hostnames
-  (e.g. `mybitbucket`) resolve to their FQDN instead of `503`-ing at the proxy.
-  Only affects dotless names; FQDNs, the LLM endpoint, and the egress allowlist
+- **Squid `append_domain`** — `squid.conf` now appends the internal domain
+  (`.corp.local`; set it to yours) to bare hostnames, so clients can reach
+  internal services by short name (e.g. `mybitbucket`) instead of `503`-ing at
+  the proxy. Squid ignores the resolv.conf `search` list (it uses its own
+  resolver), so this lives in `squid.conf`, not a compose `dns_search`. Only
+  dotless names are affected; FQDNs, the LLM endpoint, and the egress allowlist
   are unchanged (the allowlist matches the requested name, before DNS).
 
 ### Fixed
