@@ -27,6 +27,22 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
+## [0.0.9] — 2026-07-10
+
+**Action required:** re-pull image. The default theme name changed from `corp`
+to `corp-dark`; if you pointed your own `tui.json`'s `theme` field (or a
+`disabled.yaml` `themes:` entry) at `corp`, update it to `corp-dark` or
+`corp-light`.
+
+### Changed
+- **Split the bundled `corp` theme into separate `corp-dark` and `corp-light`
+  theme files** (`opencode/bundle/themes/corp-dark.json` /
+  `corp-light.json`), replacing the single `corp.json` that encoded both
+  palettes via per-key `{dark, light}` objects. Each file is now a flat,
+  self-contained theme with its own `defs`/`theme` blocks, so either can be
+  selected directly by name. `tui.json`'s default `theme` is now `corp-dark`
+  (previously `corp`).
+
 ## [0.0.8] — 2026-07-09
 
 **Action required:** re-pull image. Opt in to `opencode-pty` via
