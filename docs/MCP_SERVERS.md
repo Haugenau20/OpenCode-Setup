@@ -48,7 +48,7 @@ independent — you can have API access without git, or vice versa.
 
 | Service   | Enabled when these are set                          | Force off               |
 |-----------|-----------------------------------------------------|-------------------------|
-| Bitbucket | `BITBUCKET_BASE_URL`, `BITBUCKET_USER`, `BITBUCKET_PAT` | `DISABLE_BITBUCKET_MCP=1` |
+| Bitbucket | `BITBUCKET_BASE_URL`, `BITBUCKET_PAT` (`BITBUCKET_USER` optional, git-over-HTTPS only) | `DISABLE_BITBUCKET_MCP=1` |
 | GitLab    | `GITLAB_BASE_URL`, `GITLAB_USER`, `GITLAB_PAT`       | `DISABLE_GITLAB_MCP=1`  |
 | Jira      | `JIRA_BASE_URL`, `JIRA_PAT`                         | `DISABLE_JIRA_MCP=1`    |
 | JFrog     | `JFROG_BASE_URL`, `JFROG_PAT`                       | `DISABLE_JFROG_MCP=1`   |
@@ -63,8 +63,12 @@ attach. When creds are absent the entrypoint omits the block entirely.
 No account passwords are stored — each service authenticates with a PAT, in
 the scheme its server expects (verified against the live instances):
 
-- **Bitbucket** — a single PAT serves both `git` and the REST API, presented as
-  HTTP Basic. The server builds `base64("<BITBUCKET_USER>:<BITBUCKET_PAT>")`.
+- **Bitbucket** (Data Center) — the REST API presents the PAT as a **Bearer**
+  token (`Authorization: Bearer <BITBUCKET_PAT>`); no username is involved, same
+  shape as Jira. The same PAT still serves `git`, but git-over-HTTPS speaks HTTP
+  Basic (`BITBUCKET_USER:BITBUCKET_PAT`) — handled by the entrypoint's credential
+  helper, not this server — so `BITBUCKET_USER` is optional and only needed if
+  you clone/push Bitbucket over HTTPS.
 - **GitLab** — a single PAT serves both `git` and the REST API too, but the
   REST API uses GitLab's own idiomatic scheme: the PAT goes as a
   `PRIVATE-TOKEN: <GITLAB_PAT>` header against `${GITLAB_BASE_URL}/api/v4`
@@ -95,9 +99,13 @@ The entrypoint's only job for MCP is gating: it `jq`-injects the matching
 `mcp.<name>` block into the rendered `~/.config/opencode/opencode.json` only
 when a service's credential trio is present. All egress goes through Squid.
 
-> **`BITBUCKET_BASE_URL` is plain HTTP on the internal instance.** Using
-> `https://` yields a TLS `wrong version number` error. Set the scheme your
-> instance actually serves; no trailing slash.
+> **`BITBUCKET_BASE_URL` — prefer the canonical HTTPS endpoint** your server
+> redirects to (e.g. `https://bitbucket.internal.example:8443`). The plain-HTTP
+> connector (`http://…:7990`) also serves the REST API, but a repo cloned from it
+> can trigger an auth-redirect prompt (see TROUBLESHOOTING and
+> `BITBUCKET_LEGACY_URL`). `https://` only works on the real TLS port — pointing
+> it at the plain-HTTP connector port yields a TLS `wrong version number` error.
+> No trailing slash.
 >
 > **`GITLAB_BASE_URL` is HTTPS**, unlike Bitbucket above — no trailing slash
 > either way.

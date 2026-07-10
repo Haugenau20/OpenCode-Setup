@@ -490,11 +490,16 @@ SRC='source "$ENTRYPOINT"'
   [ "$status" -ne 0 ]
 }
 
-@test "mcp_credentials_present: git-remote service (needs_user=1) also requires <SVC>_USER" {
-  run bash -c "$SRC"'; BITBUCKET_BASE_URL=http://b BITBUCKET_PAT=t mcp_credentials_present bitbucket 1'
+@test "mcp_credentials_present: needs_user=1 service (GitLab) also requires <SVC>_USER" {
+  run bash -c "$SRC"'; GITLAB_BASE_URL=http://g GITLAB_PAT=t mcp_credentials_present gitlab 1'
   [ "$status" -ne 0 ]   # user missing -> not up
-  run bash -c "$SRC"'; BITBUCKET_BASE_URL=http://b BITBUCKET_PAT=t BITBUCKET_USER=me mcp_credentials_present bitbucket 1'
+  run bash -c "$SRC"'; GITLAB_BASE_URL=http://g GITLAB_PAT=t GITLAB_USER=me mcp_credentials_present gitlab 1'
   [ "$status" -eq 0 ]   # user present -> up
+}
+
+@test "mcp_credentials_present: Bitbucket (needs_user=0, Bearer REST) is up without <SVC>_USER" {
+  run bash -c "$SRC"'; BITBUCKET_BASE_URL=http://b BITBUCKET_PAT=t mcp_credentials_present bitbucket 0'
+  [ "$status" -eq 0 ]
 }
 
 @test "mcp_credentials_present: an entirely unconfigured service is not up" {

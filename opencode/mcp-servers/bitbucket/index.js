@@ -21,7 +21,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { fetch } from "undici";
 import { z } from "zod";
-import { makeDispatcher, requireEnv, basicAuth, toolError } from "../_lib/common.js";
+import { makeDispatcher, requireEnv, bearerAuth, toolError } from "../_lib/common.js";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -30,10 +30,12 @@ import { makeDispatcher, requireEnv, basicAuth, toolError } from "../_lib/common
 // Read the canonical .env names directly. docker compose passes these through
 // env_file, so they're in the container environment and inherited by whatever
 // process opencode spawns this server from (backend OR the TUI's docker exec) —
-// unlike a var only export-ed at runtime by PID 1. The HTTP Basic credential is
-// derived here from user:pat (a single PAT serves both git and the API), so
-// nothing needs to pre-encode it.
-requireEnv(["BITBUCKET_BASE_URL", "BITBUCKET_USER", "BITBUCKET_PAT"]);
+// unlike a var only export-ed at runtime by PID 1. The REST API authenticates
+// with the PAT as a Bearer token (Bitbucket Data Center HTTP access tokens),
+// so no username is needed here — BITBUCKET_USER is optional and consumed only
+// by the git credential helper (git-over-HTTP still speaks Basic), which lives
+// in the entrypoint, not this server.
+requireEnv(["BITBUCKET_BASE_URL", "BITBUCKET_PAT"]);
 // Bitbucket alone treats a missing proxy as fatal (preserving prior
 // behavior); the other four servers fall back to a direct connection when no
 // proxy is configured (see makeDispatcher()).
@@ -43,10 +45,9 @@ if (!process.env.HTTPS_PROXY && !process.env.HTTP_PROXY) {
 }
 
 const BB_BASE_URL = process.env.BITBUCKET_BASE_URL.replace(/\/$/, "");
-const BB_USER = process.env.BITBUCKET_USER;
 const BB_PAT = process.env.BITBUCKET_PAT;
 
-const BB_AUTH_HEADER = basicAuth(BB_USER, BB_PAT);
+const BB_AUTH_HEADER = bearerAuth(BB_PAT);
 
 const proxyAgent = makeDispatcher();
 

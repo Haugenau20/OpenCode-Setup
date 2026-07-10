@@ -27,6 +27,38 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
+## [Unreleased]
+
+**Action required:** edit .env. `BITBUCKET_USER` is now optional (the Bitbucket
+MCP authenticates its REST API with a Bearer PAT); keep it set only if you clone
+Bitbucket over HTTPS. Consider pointing `BITBUCKET_BASE_URL` at your canonical
+HTTPS endpoint and setting the new optional `BITBUCKET_LEGACY_URL`.
+
+### Added
+- **`BITBUCKET_LEGACY_URL` (optional)** — when set to a legacy Bitbucket URL that
+  redirects to `BITBUCKET_BASE_URL` (typically the plain-HTTP connector on
+  `:7990`), the entrypoint bakes a git `url.<canonical>.insteadOf <legacy>`
+  rewrite into the container `.gitconfig`. A repo remote still pointing at the
+  legacy URL is transparently upgraded before git connects, so the server's
+  HTTP→HTTPS redirect no longer surfaces as an interactive
+  `Username for 'https://…:8443'` prompt. No-op when unset.
+
+### Changed
+- **Bitbucket MCP now authenticates with a Bearer PAT** (Bitbucket Data Center
+  HTTP access token) instead of HTTP Basic, matching Jira/JFrog/Confluence.
+  `BITBUCKET_USER` is no longer required to enable the MCP — it is optional and
+  consumed only by the git credential helper for git-over-HTTPS. Existing setups
+  with the full trio keep working unchanged.
+- **`.env.example` now defaults `BITBUCKET_BASE_URL` to HTTPS** and the docs
+  steer toward the canonical HTTPS endpoint; the plain-HTTP connector still works
+  for the REST API but is the source of the redirect prompt above.
+
+### Docs
+- **TROUBLESHOOTING.md** — new entry for the per-user
+  `Username for 'https://…:8443'` git prompt (a Bitbucket base-URL redirect
+  surfaced by the repo's git remote, not `BITBUCKET_BASE_URL`), with confirm/fix
+  steps and the `BITBUCKET_LEGACY_URL` fleet-wide prevention.
+
 ## [0.0.8] — 2026-07-09
 
 **Action required:** re-pull image. Opt in to `opencode-pty` via

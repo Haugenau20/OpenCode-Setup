@@ -256,10 +256,25 @@ git -C <REPO_PATH> remote set-url origin ssh://git@bitbucket.internal.example/sc
 git -C <REPO_PATH> remote set-url origin https://bitbucket.internal.example:8443/scm/PROJ/repo.git
 ```
 
-Also make sure that user's `.env` has the full trio — `BITBUCKET_USER` **and**
-`BITBUCKET_PAT`, not just `BITBUCKET_BASE_URL`. The in-container credential
-helper (`entrypoint.sh` §6) is only generated when both are present; without it
-git can't answer the prompt on its own even for a correctly-pointed remote.
+Also make sure that user's `.env` has `BITBUCKET_USER` **and** `BITBUCKET_PAT`
+set for git-over-HTTPS. The in-container credential helper (`entrypoint.sh` §6)
+only generates a Bitbucket arm when both are present; without it git can't
+answer the prompt on its own even for a correctly-pointed remote. (The Bitbucket
+*MCP* no longer needs `BITBUCKET_USER` — its REST API uses a Bearer PAT — but
+git-over-HTTPS still does.)
+
+**Get ahead of it fleet-wide.** Rather than fixing each clone by hand, set
+`BITBUCKET_LEGACY_URL` in `.env` to the legacy URL that redirects (e.g.
+`http://bitbucket.internal.example:7990`) alongside a canonical
+`BITBUCKET_BASE_URL` (e.g. `https://bitbucket.internal.example:8443`). The
+entrypoint then bakes a git `url.<canonical>.insteadOf <legacy>` rewrite into the
+container's `.gitconfig`, so **any** mounted repo whose remote still points at
+the legacy URL is transparently upgraded before git connects — no redirect, no
+prompt, no per-user host change. Confirm it landed with:
+
+```bash
+docker exec opencode-<slug> git config --get-regexp '^url\.'
+```
 
 ## "x509: certificate signed by unknown authority"
 
