@@ -1,0 +1,79 @@
+{
+  "$schema": "https://opencode.ai/theme.json",
+  "defs": {
+    "corpLightBackground": "#F3F3F2",
+    "corpLightFooter": "#373532",
+    "corpLightContainer1": "#E3E3E1",
+    "corpLightContainer2": "#FFFFFF",
+    "corpLightContainer3": "#E0DCD6",
+    "corpLightMutedText": "#5F5D5B",
+
+    "corpCtaYellow": "#FAB900",
+    "corpCtaBlue": "#004C97",
+    "corpInvalid": "#DA291C",
+    "corpValid": "#24A148",
+    "corpCaution": "#FF6700",
+    "corpWarning": "#FFE100",
+
+    "corpDiffAddedBg": "#DFF4E7",
+    "corpDiffRemovedBg": "#F9DEDB"
+  },
+  "theme": {
+    "primary": "corpCtaYellow",
+    "secondary": "corpCtaBlue",
+    "accent": "corpCaution",
+
+    "error": "corpInvalid",
+    "warning": "corpWarning",
+    "success": "corpValid",
+    "info": "corpCtaBlue",
+
+    "text": "corpLightFooter",
+    "textMuted": "corpLightMutedText",
+
+    "background": "corpLightBackground",
+    "backgroundPanel": "corpLightContainer1",
+    "backgroundElement": "corpLightContainer2",
+
+    "border": "corpLightContainer1",
+    "borderActive": "corpCtaYellow",
+    "borderSubtle": "corpLightContainer3",
+
+    "diffAdded": "corpValid",
+    "diffRemoved": "corpInvalid",
+    "diffContext": "corpLightMutedText",
+    "diffHunkHeader": "corpCtaYellow",
+
+    "diffAddedBg": "corpDiffAddedBg",
+    "diffRemovedBg": "corpDiffRemovedBg",
+    "diffContextBg": "corpLightBackground",
+    "diffLineNumber": "corpLightMutedText",
+    "diffAddedLineNumberBg": "corpDiffAddedBg",
+    "diffRemovedLineNumberBg": "corpDiffRemovedBg",
+
+    "markdownText": "corpLightFooter",
+    "markdownHeading": "corpCtaBlue",
+    "markdownLink": "corpCtaBlue",
+    "markdownLinkText": "corpCtaBlue",
+    "markdownCode": "corpLightFooter",
+    "markdownBlockQuote": "corpLightMutedText",
+    "markdownEmph": "corpCaution",
+    "markdownStrong": "corpLightFooter",
+    "markdownHorizontalRule": "corpLightContainer3",
+    "markdownListItem": "corpCaution",
+    "markdownListEnumeration": "corpCaution",
+    "markdownImage": "corpCtaBlue",
+    "markdownImageText": "corpCtaBlue",
+    "markdownCodeBlock": "corpLightFooter",
+
+    "syntaxComment": "corpLightMutedText",
+    "syntaxKeyword": "corpCtaBlue",
+    "syntaxFunction": "corpCtaBlue",
+    "syntaxVariable": "corpLightFooter",
+    "syntaxString": "corpValid",
+    "syntaxNumber": "corpCaution",
+    "syntaxType": "corpCtaBlue",
+    "syntaxOperator": "corpCaution",
+    "syntaxPunctuation": "corpLightFooter"
+  }
+}

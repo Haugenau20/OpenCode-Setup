@@ -1,0 +1,78 @@
+{
+  "$schema": "https://opencode.ai/theme.json",
+  "defs": {
+    "corpDarkBackground": "#373532",
+    "corpDarkContainer1": "#5F5D5B",
+    "corpDarkContainer2": "#878684",
+    "corpDarkPrimaryText": "#F3F3F2",
+    "corpDarkMutedText": "#D0CFCC",
+
+    "corpCtaYellow": "#FAB900",
+    "corpCtaBlue": "#004C97",
+    "corpInvalid": "#DA291C",
+    "corpValid": "#24A148",
+    "corpCaution": "#FF6700",
+    "corpWarning": "#FFE100",
+
+    "corpDiffAddedBg": "#1E4730",
+    "corpDiffRemovedBg": "#5A211D"
+  },
+  "theme": {
+    "primary": "corpCtaYellow",
+    "secondary": "corpCtaBlue",
+    "accent": "corpCaution",
+
+    "error": "corpInvalid",
+    "warning": "corpWarning",
+    "success": "corpValid",
+    "info": "corpCtaBlue",
+
+    "text": "corpDarkPrimaryText",
+    "textMuted": "corpDarkMutedText",
+
+    "background": "corpDarkBackground",
+    "backgroundPanel": "corpDarkContainer1",
+    "backgroundElement": "corpDarkContainer2",
+
+    "border": "corpDarkContainer1",
+    "borderActive": "corpCtaYellow",
+    "borderSubtle": "corpDarkContainer2",
+
+    "diffAdded": "corpValid",
+    "diffRemoved": "corpInvalid",
+    "diffContext": "corpDarkMutedText",
+    "diffHunkHeader": "corpCtaYellow",
+
+    "diffAddedBg": "corpDiffAddedBg",
+    "diffRemovedBg": "corpDiffRemovedBg",
+    "diffContextBg": "corpDarkBackground",
+    "diffLineNumber": "corpDarkMutedText",
+    "diffAddedLineNumberBg": "corpDiffAddedBg",
+    "diffRemovedLineNumberBg": "corpDiffRemovedBg",
+
+    "markdownText": "corpDarkPrimaryText",
+    "markdownHeading": "corpCtaYellow",
+    "markdownLink": "corpCtaBlue",
+    "markdownLinkText": "corpCtaBlue",
+    "markdownCode": "corpDarkPrimaryText",
+    "markdownBlockQuote": "corpDarkMutedText",
+    "markdownEmph": "corpCaution",
+    "markdownStrong": "corpDarkPrimaryText",
+    "markdownHorizontalRule": "corpDarkContainer2",
+    "markdownListItem": "corpCaution",
+    "markdownListEnumeration": "corpCaution",
+    "markdownImage": "corpCtaBlue",
+    "markdownImageText": "corpCtaBlue",
+    "markdownCodeBlock": "corpDarkPrimaryText",
+
+    "syntaxComment": "corpDarkMutedText",
+    "syntaxKeyword": "corpCtaYellow",
+    "syntaxFunction": "corpCtaBlue",
+    "syntaxVariable": "corpDarkPrimaryText",
+    "syntaxString": "corpValid",
+    "syntaxNumber": "corpCaution",
+    "syntaxType": "corpCtaBlue",
+    "syntaxOperator": "corpWarning",
+    "syntaxPunctuation": "corpDarkPrimaryText"
+  }
+}
