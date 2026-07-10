@@ -144,16 +144,18 @@ actually does, force a tunnel: `curl --proxytunnel --proxy http://squid:3128
 http://<host>:<port>/…` — if that returns `403` while the plain proxied curl
 returns `200`, add `<port>` to `SSL_ports`.
 
-> Related gotcha — `NO_PROXY` and a `.local` corp domain: `NO_PROXY` (in
-> `docker-compose.yml` and `policy.yaml`) includes `.local`. A plain `curl` to a
-> `*.local` **FQDN** will *bypass* the proxy entirely (curl honors `NO_PROXY`),
-> connect directly, and fail since the opencode container has no egress — another
-> "works in theory, fails in practice" trap when testing by hand. The MCP client
-> does **not** consult `NO_PROXY` (the `ProxyAgent` is an explicit dispatcher),
-> so this only bites manual `curl` testing. Test with `env no_proxy= NO_PROXY=
-> curl …` to mirror the MCP. If you address services by their `.local` FQDN and
-> want `curl` to behave, either clear `NO_PROXY` for the test or drop `.local`
-> from it.
+> Related gotcha — **keep corp domain suffixes OUT of `NO_PROXY`.** `NO_PROXY`
+> (in `docker-compose.yml` and `policy.yaml`) lists only loopback + the docker
+> sidecar names; it deliberately does **not** include `.local`. If it did, any
+> internal service addressed by a `*.local` **FQDN** — e.g.
+> `bitbucket.corp.local` — would match `NO_PROXY` and be routed **directly**
+> instead of through squid. The container has no direct egress, so `git` and
+> `curl` to that host fail (`could not resolve host` / `CONNECT tunnel failed`).
+> This is not just a manual-testing quirk: it breaks `git`-over-HTTPS (the
+> `ALLOW_REMOTE_GIT` feature) too. The MCP would still work — undici's
+> `ProxyAgent` ignores `NO_PROXY` — which is exactly what masks the problem: the
+> REST plane looks healthy while git is broken. To mirror the MCP when testing by
+> hand, force the proxy: `env no_proxy= NO_PROXY= curl -x http://squid:3128 …`.
 
 ## TLS
 

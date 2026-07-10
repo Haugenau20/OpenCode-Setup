@@ -320,10 +320,10 @@ SRC='source "$ENTRYPOINT"'
 @test "apply_policy_env: a value containing colons (NO_PROXY-shaped) exports intact with no quote characters" {
   local f="$BATS_TEST_TMPDIR/policy.yaml"
   printf '%s\n' 'env:' \
-    '  NO_PROXY: "localhost,127.0.0.1,::1,opencode,rag,squid,.local"' > "$f"
+    '  NO_PROXY: "localhost,127.0.0.1,::1,opencode,rag,squid"' > "$f"
   run bash -c "$SRC"'; apply_policy_env "'"$f"'"; printf "%s" "$NO_PROXY"'
   [ "$status" -eq 0 ]
-  [ "$output" = "localhost,127.0.0.1,::1,opencode,rag,squid,.local" ]
+  [ "$output" = "localhost,127.0.0.1,::1,opencode,rag,squid" ]
   [[ "$output" != *'"'* ]]
 }
 
@@ -357,7 +357,7 @@ SRC='source "$ENTRYPOINT"'
 @test "apply_policy_env: matches the real opencode/policy.yaml shipped in this repo" {
   run bash -c "$SRC"'; apply_policy_env "'"$REPO_ROOT"'/opencode/policy.yaml"; printf "%s|%s" "$OPENCODE_DISABLE_TELEMETRY" "$NO_PROXY"'
   [ "$status" -eq 0 ]
-  [ "$output" = "1|localhost,127.0.0.1,::1,opencode,rag,squid,.local" ]
+  [ "$output" = "1|localhost,127.0.0.1,::1,opencode,rag,squid" ]
 }
 
 # --- extra_instruction_paths() --------------------------------------------

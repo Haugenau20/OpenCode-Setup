@@ -276,6 +276,44 @@ prompt, no per-user host change. Confirm it landed with:
 docker exec opencode-<slug> git config --get-regexp '^url\.'
 ```
 
+## git/curl fail with "could not resolve host" (but the MCP works)
+
+**Symptom.** The Bitbucket/GitLab **MCP works**, yet a hand-run `git` or `curl`
+against the same internal host fails — even with `ALLOW_REMOTE_GIT=1`:
+
+```
+fatal: unable to access 'https://bitbucket.corp.local:8443/…': Could not resolve host
+# or:  CONNECT tunnel failed, response 503
+```
+
+An agent may wrongly conclude the server "needs VPN" or "isn't accessible." It
+is — the working MCP proves the container can reach it through Squid.
+
+**Cause — `NO_PROXY` matches your corp domain.** If `NO_PROXY` (in
+`docker-compose.yml` / `policy.yaml`) contains a suffix that matches your host
+— classically `.local` matching `bitbucket.corp.local` — then every
+proxy-honoring client (`git`, `curl`) **bypasses Squid and connects directly**.
+The container has no direct egress, so DNS/connect fails. The MCP escapes this
+only because undici's `ProxyAgent` ignores `NO_PROXY` — which is why the REST
+plane looks healthy while git is broken.
+
+**Confirm** (forcing the proxy should succeed where the default fails):
+
+```bash
+# fails (bypasses squid, direct):
+docker exec opencode-<slug> curl -sS -o /dev/null -w '%{http_code}\n' -x http://squid:3128 \
+  https://bitbucket.corp.local:8443/rest/api/1.0/application-properties
+# works (forces proxy, mirrors the MCP):
+docker exec opencode-<slug> env no_proxy= NO_PROXY= curl -sS -o /dev/null -w '%{http_code}\n' \
+  -x http://squid:3128 https://bitbucket.corp.local:8443/rest/api/1.0/application-properties
+```
+
+**Fix.** Remove the matching suffix (e.g. `.local`) from `NO_PROXY` in
+`docker-compose.yml` **and** `policy.yaml`, then rebuild/recreate
+(`docker compose up -d --build`). Keep only loopback and the docker sidecar
+names (`opencode`, `squid`, `rag`) there — everything external must route
+through Squid. (Shipped images from this repo already exclude `.local`.)
+
 ## "x509: certificate signed by unknown authority"
 
 The corp CA wasn't baked into the image. The image needs to be rebuilt

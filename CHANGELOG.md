@@ -29,10 +29,12 @@ up. The vocabulary:
 
 ## [Unreleased]
 
-**Action required:** edit .env. `BITBUCKET_USER` is now optional (the Bitbucket
-MCP authenticates its REST API with a Bearer PAT); keep it set only if you clone
-Bitbucket over HTTPS. Consider pointing `BITBUCKET_BASE_URL` at your canonical
-HTTPS endpoint and setting the new optional `BITBUCKET_LEGACY_URL`.
+**Action required:** re-pull image + recreate the stack (the `NO_PROXY` fix
+ships in the image and `docker-compose.yml`), then edit .env. `BITBUCKET_USER`
+is now optional (the Bitbucket MCP authenticates its REST API with a Bearer
+PAT); keep it set only if you clone Bitbucket over HTTPS. Consider pointing
+`BITBUCKET_BASE_URL` at your canonical HTTPS endpoint and setting the new
+optional `BITBUCKET_LEGACY_URL`.
 
 ### Added
 - **`BITBUCKET_LEGACY_URL` (optional)** — when set to a legacy Bitbucket URL that
@@ -52,6 +54,15 @@ HTTPS endpoint and setting the new optional `BITBUCKET_LEGACY_URL`.
 - **`.env.example` now defaults `BITBUCKET_BASE_URL` to HTTPS** and the docs
   steer toward the canonical HTTPS endpoint; the plain-HTTP connector still works
   for the REST API but is the source of the redirect prompt above.
+
+### Fixed
+- **Removed `.local` from `NO_PROXY`** (`docker-compose.yml` + `policy.yaml`).
+  It matched internal FQDNs like `bitbucket.corp.local`, forcing `git`/`curl` to
+  bypass squid and connect directly — which fails, since the container has no
+  direct egress (`could not resolve host` / `CONNECT tunnel failed`). The MCP
+  masked this by using undici's `ProxyAgent`, which ignores `NO_PROXY`. With
+  `.local` gone, all clients route corp `*.local` hosts through squid, so
+  git-over-HTTPS (and manual curl) reach Bitbucket like the MCP already does.
 
 ### Docs
 - **TROUBLESHOOTING.md** — new entry for the per-user

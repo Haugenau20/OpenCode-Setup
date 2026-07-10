@@ -21,9 +21,12 @@ services:
       https_proxy: http://squid:3128
       # NO_PROXY is also set in policy.yaml; this is the docker-side copy so
       # in-container DNS for sidecars (rag, squid, opencode itself) bypasses
-      # the proxy.
-      NO_PROXY: "localhost,127.0.0.1,::1,opencode,squid,rag,.local"
-      no_proxy: "localhost,127.0.0.1,::1,opencode,squid,rag,.local"
+      # the proxy. Deliberately NO `.local` here: a corp service addressed by a
+      # *.local FQDN (e.g. bitbucket.corp.local) would otherwise match and be
+      # routed DIRECTLY instead of through squid — breaking git/curl to it. See
+      # policy.yaml for the full rationale.
+      NO_PROXY: "localhost,127.0.0.1,::1,opencode,squid,rag"
+      no_proxy: "localhost,127.0.0.1,::1,opencode,squid,rag"
       OPENCODE_INTERNAL_PORT: "4096"
       # opencode-pty viewer: force the plugin to bind non-loopback (so oc-publish
       # can reach it) and to a fixed, per-instance port DERIVED from OPENCODE_PORT
