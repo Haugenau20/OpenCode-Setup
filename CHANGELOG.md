@@ -54,6 +54,12 @@ optional `BITBUCKET_LEGACY_URL`.
 - **`.env.example` now defaults `BITBUCKET_BASE_URL` to HTTPS** and the docs
   steer toward the canonical HTTPS endpoint; the plain-HTTP connector still works
   for the REST API but is the source of the redirect prompt above.
+- **Git credential helper now answers for the bare hostname too.** It matches
+  both the FQDN (`mybitbucket.corp.local`) and its short first-label form
+  (`mybitbucket`), so a remote using the short name (resolved by Squid's
+  `append_domain`) authenticates instead of falling back to an interactive
+  `Username for …` prompt. Still requires `BITBUCKET_USER`/`GITLAB_USER` —
+  git-over-HTTPS is HTTP Basic and needs a username.
 
 ### Added
 - **Squid `append_domain`** — `squid.conf` now appends the internal domain

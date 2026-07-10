@@ -576,12 +576,22 @@ fi
 # $-expansions in the GENERATED helper (evaluated later, when git invokes it) —
 # while ${bb_host} / ${BITBUCKET_USER} / etc. (no backslash) expand NOW, at
 # generation time, baking the real hostnames/creds into the file.
+# Match BOTH the FQDN and the bare first-label hostname, so a remote that uses
+# the short name (e.g. `mybitbucket`, resolved by Squid's append_domain) gets
+# creds just like the FQDN form. git sends the LITERAL requested host to the
+# helper — append_domain only affects Squid's DNS, not what git asks for — so the
+# helper itself must accept both. `a|b` is a case-pattern alternation baked in at
+# generation time; the guard skips a useless `x|x` when the host has no dots.
+bb_short="${bb_host%%.*}"
+gl_short="${gl_host%%.*}"
 cred_arms=""
 if [ -n "${BITBUCKET_USER:-}" ] && [ -n "${BITBUCKET_PAT:-}" ]; then
-    cred_arms="${cred_arms}${bb_host}) echo username=${BITBUCKET_USER}; echo password=\${BITBUCKET_PAT} ;; "
+    bb_pat="${bb_host}"; [ "${bb_short}" != "${bb_host}" ] && bb_pat="${bb_host}|${bb_short}"
+    cred_arms="${cred_arms}${bb_pat}) echo username=${BITBUCKET_USER}; echo password=\${BITBUCKET_PAT} ;; "
 fi
 if [ -n "${GITLAB_USER:-}" ] && [ -n "${GITLAB_PAT:-}" ]; then
-    cred_arms="${cred_arms}${gl_host}) echo username=${GITLAB_USER}; echo password=\${GITLAB_PAT} ;; "
+    gl_pat="${gl_host}"; [ "${gl_short}" != "${gl_host}" ] && gl_pat="${gl_host}|${gl_short}"
+    cred_arms="${cred_arms}${gl_pat}) echo username=${GITLAB_USER}; echo password=\${GITLAB_PAT} ;; "
 fi
 
 # Write ~/.gitconfig when there's anything to put in it: a credential helper
