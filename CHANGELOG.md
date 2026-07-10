@@ -55,6 +55,13 @@ optional `BITBUCKET_LEGACY_URL`.
   steer toward the canonical HTTPS endpoint; the plain-HTTP connector still works
   for the REST API but is the source of the redirect prompt above.
 
+### Added
+- **Squid `dns_search`** — the Squid service now carries a DNS search domain
+  (`corp.local`; set it to your internal domain) so bare internal hostnames
+  (e.g. `mybitbucket`) resolve to their FQDN instead of `503`-ing at the proxy.
+  Only affects dotless names; FQDNs, the LLM endpoint, and the egress allowlist
+  are unchanged (the allowlist matches the requested name, before DNS).
+
 ### Fixed
 - **Removed `.local` from `NO_PROXY`** (`docker-compose.yml` + `policy.yaml`).
   It matched internal FQDNs like `bitbucket.corp.local`, forcing `git`/`curl` to

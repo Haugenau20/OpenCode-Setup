@@ -94,6 +94,14 @@ services:
       dockerfile: squid/Dockerfile
     container_name: opencode-squid-${PROJECT_SLUG:-default}
     hostname: squid
+    # DNS search domain so Squid can resolve BARE internal hostnames (e.g.
+    # `mybitbucket` -> `mybitbucket.corp.local`). Squid resolves every proxied
+    # target, so it is the container that needs this. Only affects dotless names
+    # (and as-is lookups that fail); FQDNs and the LLM endpoint are untouched,
+    # and it does NOT change the egress allowlist — dstdomain matches the
+    # REQUESTED name, before DNS. Set this to YOUR internal domain before deploy.
+    dns_search:
+      - corp.local
     volumes:
       # Per-developer allowlist additions. Drop *.conf files into
       # ./extra-allowlist.d/ on the host (gitignored) and restart squid.
