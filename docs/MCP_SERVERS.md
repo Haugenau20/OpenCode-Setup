@@ -48,7 +48,7 @@ independent — you can have API access without git, or vice versa.
 
 | Service   | Enabled when these are set                          | Force off               |
 |-----------|-----------------------------------------------------|-------------------------|
-| Bitbucket | `BITBUCKET_BASE_URL`, `BITBUCKET_USER`, `BITBUCKET_PAT` | `DISABLE_BITBUCKET_MCP=1` |
+| Bitbucket | `BITBUCKET_BASE_URL`, `BITBUCKET_PAT` (`BITBUCKET_USER` optional, git-over-HTTPS only) | `DISABLE_BITBUCKET_MCP=1` |
 | GitLab    | `GITLAB_BASE_URL`, `GITLAB_USER`, `GITLAB_PAT`       | `DISABLE_GITLAB_MCP=1`  |
 | Jira      | `JIRA_BASE_URL`, `JIRA_PAT`                         | `DISABLE_JIRA_MCP=1`    |
 | JFrog     | `JFROG_BASE_URL`, `JFROG_PAT`                       | `DISABLE_JFROG_MCP=1`   |
@@ -63,8 +63,12 @@ attach. When creds are absent the entrypoint omits the block entirely.
 No account passwords are stored — each service authenticates with a PAT, in
 the scheme its server expects (verified against the live instances):
 
-- **Bitbucket** — a single PAT serves both `git` and the REST API, presented as
-  HTTP Basic. The server builds `base64("<BITBUCKET_USER>:<BITBUCKET_PAT>")`.
+- **Bitbucket** (Data Center) — the REST API presents the PAT as a **Bearer**
+  token (`Authorization: Bearer <BITBUCKET_PAT>`); no username is involved, same
+  shape as Jira. The same PAT still serves `git`, but git-over-HTTPS speaks HTTP
+  Basic (`BITBUCKET_USER:BITBUCKET_PAT`) — handled by the entrypoint's credential
+  helper, not this server — so `BITBUCKET_USER` is optional and only needed if
+  you clone/push Bitbucket over HTTPS.
 - **GitLab** — a single PAT serves both `git` and the REST API too, but the
   REST API uses GitLab's own idiomatic scheme: the PAT goes as a
   `PRIVATE-TOKEN: <GITLAB_PAT>` header against `${GITLAB_BASE_URL}/api/v4`
@@ -95,9 +99,13 @@ The entrypoint's only job for MCP is gating: it `jq`-injects the matching
 `mcp.<name>` block into the rendered `~/.config/opencode/opencode.json` only
 when a service's credential trio is present. All egress goes through Squid.
 
-> **`BITBUCKET_BASE_URL` is plain HTTP on the internal instance.** Using
-> `https://` yields a TLS `wrong version number` error. Set the scheme your
-> instance actually serves; no trailing slash.
+> **`BITBUCKET_BASE_URL` — prefer the canonical HTTPS endpoint** your server
+> redirects to (e.g. `https://bitbucket.internal.example:8443`). The plain-HTTP
+> connector (`http://…:7990`) also serves the REST API, but a repo cloned from it
+> can trigger an auth-redirect prompt (see TROUBLESHOOTING and
+> `BITBUCKET_LEGACY_URL`). `https://` only works on the real TLS port — pointing
+> it at the plain-HTTP connector port yields a TLS `wrong version number` error.
+> No trailing slash.
 >
 > **`GITLAB_BASE_URL` is HTTPS**, unlike Bitbucket above — no trailing slash
 > either way.
@@ -136,16 +144,18 @@ actually does, force a tunnel: `curl --proxytunnel --proxy http://squid:3128
 http://<host>:<port>/…` — if that returns `403` while the plain proxied curl
 returns `200`, add `<port>` to `SSL_ports`.
 
-> Related gotcha — `NO_PROXY` and a `.local` corp domain: `NO_PROXY` (in
-> `docker-compose.yml` and `policy.yaml`) includes `.local`. A plain `curl` to a
-> `*.local` **FQDN** will *bypass* the proxy entirely (curl honors `NO_PROXY`),
-> connect directly, and fail since the opencode container has no egress — another
-> "works in theory, fails in practice" trap when testing by hand. The MCP client
-> does **not** consult `NO_PROXY` (the `ProxyAgent` is an explicit dispatcher),
-> so this only bites manual `curl` testing. Test with `env no_proxy= NO_PROXY=
-> curl …` to mirror the MCP. If you address services by their `.local` FQDN and
-> want `curl` to behave, either clear `NO_PROXY` for the test or drop `.local`
-> from it.
+> Related gotcha — **keep corp domain suffixes OUT of `NO_PROXY`.** `NO_PROXY`
+> (in `docker-compose.yml` and `policy.yaml`) lists only loopback + the docker
+> sidecar names; it deliberately does **not** include `.local`. If it did, any
+> internal service addressed by a `*.local` **FQDN** — e.g.
+> `bitbucket.corp.local` — would match `NO_PROXY` and be routed **directly**
+> instead of through squid. The container has no direct egress, so `git` and
+> `curl` to that host fail (`could not resolve host` / `CONNECT tunnel failed`).
+> This is not just a manual-testing quirk: it breaks `git`-over-HTTPS (the
+> `ALLOW_REMOTE_GIT` feature) too. The MCP would still work — undici's
+> `ProxyAgent` ignores `NO_PROXY` — which is exactly what masks the problem: the
+> REST plane looks healthy while git is broken. To mirror the MCP when testing by
+> hand, force the proxy: `env no_proxy= NO_PROXY= curl -x http://squid:3128 …`.
 
 ## TLS
 

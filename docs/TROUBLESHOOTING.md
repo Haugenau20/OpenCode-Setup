@@ -198,6 +198,122 @@ upstream default has been fixed and the manual step is no longer needed.
 That's the safety gate doing its job. See
 [ALLOWING_GIT_PUSH.md](ALLOWING_GIT_PUSH.md).
 
+## git prompts for `Username for 'https://…:8443'` at startup (or on fetch/push)
+
+**Symptom.** One user — not everyone — gets an interactive git prompt right
+before the TUI attaches (or on the first `fetch`/`pull`/`push`):
+
+```
+Username for 'https://bitbucket.internal.example:8443':
+```
+
+…even though `BITBUCKET_BASE_URL` is plain HTTP on `:7990` and `:8443` appears
+**nowhere** in `.env` or this repo.
+
+**This is a local, per-user problem — not a fault in this setup.** Two facts
+pin it down:
+
+1. **The `:8443` HTTPS URL comes from the Bitbucket server, not from us.**
+   Bitbucket has a canonical *Base URL* (Admin → Server settings), and corp
+   installs are usually fronted by a reverse proxy that terminates TLS. When a
+   client reaches the raw HTTP connector (`http://…:7990`), the server answers
+   `301 Location: https://…:8443` to force its canonical HTTPS address. git
+   follows the redirect and then has to authenticate against the new URL — so
+   the port and scheme in the prompt are the server's, not anything you chose.
+
+2. **It's a *git* prompt, so it comes from the repo's remote — not from
+   `BITBUCKET_BASE_URL`.** That env var is read only by the Bitbucket MCP
+   server (the REST client), which sends its `Authorization` header
+   programmatically and can never produce a terminal `Username for …` prompt.
+   A `Username for …` prompt is always git talking to a git remote, and that
+   remote lives in the `.git/config` of the repo you bind-mount at
+   `/workspace` (`REPO_PATH`) — set **per user, on their host, at clone time**.
+
+So the user whose clone points at `http://…:7990` hits the redirect; users who
+cloned over SSH (`ssh://git@…`) or the canonical `https://…:8443` never do.
+(For the op to run at all he also has `ALLOW_REMOTE_GIT=1`; otherwise
+`git-guard` blocks fetch/pull/push outright.)
+
+**Confirm it:**
+
+```bash
+# What is the repo's remote actually pointing at?
+git -C <REPO_PATH> remote -v
+
+# Prove the server-side redirect (look for "Location: https://…:8443"):
+curl -sSI "http://bitbucket.internal.example:7990/scm/PROJ/repo.git/info/refs?service=git-upload-pack"
+
+# Rule out a host-side url.insteadOf rewrite on his machine:
+git -C <REPO_PATH> config --get-regexp '^url\.'
+```
+
+**Fix it** — point the remote at the same canonical address everyone else uses:
+
+```bash
+# SSH (sidesteps HTTP auth entirely, matches the README clone example):
+git -C <REPO_PATH> remote set-url origin ssh://git@bitbucket.internal.example/scm/PROJ/repo.git
+# …or the canonical HTTPS endpoint, so there is no redirect:
+git -C <REPO_PATH> remote set-url origin https://bitbucket.internal.example:8443/scm/PROJ/repo.git
+```
+
+Also make sure that user's `.env` has `BITBUCKET_USER` **and** `BITBUCKET_PAT`
+set for git-over-HTTPS. The in-container credential helper (`entrypoint.sh` §6)
+only generates a Bitbucket arm when both are present; without it git can't
+answer the prompt on its own even for a correctly-pointed remote. (The Bitbucket
+*MCP* no longer needs `BITBUCKET_USER` — its REST API uses a Bearer PAT — but
+git-over-HTTPS still does.)
+
+**Get ahead of it fleet-wide.** Rather than fixing each clone by hand, set
+`BITBUCKET_LEGACY_URL` in `.env` to the legacy URL that redirects (e.g.
+`http://bitbucket.internal.example:7990`) alongside a canonical
+`BITBUCKET_BASE_URL` (e.g. `https://bitbucket.internal.example:8443`). The
+entrypoint then bakes a git `url.<canonical>.insteadOf <legacy>` rewrite into the
+container's `.gitconfig`, so **any** mounted repo whose remote still points at
+the legacy URL is transparently upgraded before git connects — no redirect, no
+prompt, no per-user host change. Confirm it landed with:
+
+```bash
+docker exec opencode-<slug> git config --get-regexp '^url\.'
+```
+
+## git/curl fail with "could not resolve host" (but the MCP works)
+
+**Symptom.** The Bitbucket/GitLab **MCP works**, yet a hand-run `git` or `curl`
+against the same internal host fails — even with `ALLOW_REMOTE_GIT=1`:
+
+```
+fatal: unable to access 'https://bitbucket.corp.local:8443/…': Could not resolve host
+# or:  CONNECT tunnel failed, response 503
+```
+
+An agent may wrongly conclude the server "needs VPN" or "isn't accessible." It
+is — the working MCP proves the container can reach it through Squid.
+
+**Cause — `NO_PROXY` matches your corp domain.** If `NO_PROXY` (in
+`docker-compose.yml` / `policy.yaml`) contains a suffix that matches your host
+— classically `.local` matching `bitbucket.corp.local` — then every
+proxy-honoring client (`git`, `curl`) **bypasses Squid and connects directly**.
+The container has no direct egress, so DNS/connect fails. The MCP escapes this
+only because undici's `ProxyAgent` ignores `NO_PROXY` — which is why the REST
+plane looks healthy while git is broken.
+
+**Confirm** (forcing the proxy should succeed where the default fails):
+
+```bash
+# fails (bypasses squid, direct):
+docker exec opencode-<slug> curl -sS -o /dev/null -w '%{http_code}\n' -x http://squid:3128 \
+  https://bitbucket.corp.local:8443/rest/api/1.0/application-properties
+# works (forces proxy, mirrors the MCP):
+docker exec opencode-<slug> env no_proxy= NO_PROXY= curl -sS -o /dev/null -w '%{http_code}\n' \
+  -x http://squid:3128 https://bitbucket.corp.local:8443/rest/api/1.0/application-properties
+```
+
+**Fix.** Remove the matching suffix (e.g. `.local`) from `NO_PROXY` in
+`docker-compose.yml` **and** `policy.yaml`, then rebuild/recreate
+(`docker compose up -d --build`). Keep only loopback and the docker sidecar
+names (`opencode`, `squid`, `rag`) there — everything external must route
+through Squid. (Shipped images from this repo already exclude `.local`.)
+
 ## "x509: certificate signed by unknown authority"
 
 The corp CA wasn't baked into the image. The image needs to be rebuilt

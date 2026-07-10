@@ -8,6 +8,7 @@
     {"key": "BITBUCKET_BASE_URL", "required": false},
     {"key": "BITBUCKET_USER", "required": false},
     {"key": "BITBUCKET_PAT", "required": false},
+    {"key": "BITBUCKET_LEGACY_URL", "required": false},
     {"key": "JIRA_BASE_URL", "required": false},
     {"key": "JIRA_PAT", "required": false},
     {"key": "GITLAB_BASE_URL", "required": false},

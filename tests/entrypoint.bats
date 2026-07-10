@@ -320,10 +320,10 @@ SRC='source "$ENTRYPOINT"'
 @test "apply_policy_env: a value containing colons (NO_PROXY-shaped) exports intact with no quote characters" {
   local f="$BATS_TEST_TMPDIR/policy.yaml"
   printf '%s\n' 'env:' \
-    '  NO_PROXY: "localhost,127.0.0.1,::1,opencode,rag,squid,.local"' > "$f"
+    '  NO_PROXY: "localhost,127.0.0.1,::1,opencode,rag,squid"' > "$f"
   run bash -c "$SRC"'; apply_policy_env "'"$f"'"; printf "%s" "$NO_PROXY"'
   [ "$status" -eq 0 ]
-  [ "$output" = "localhost,127.0.0.1,::1,opencode,rag,squid,.local" ]
+  [ "$output" = "localhost,127.0.0.1,::1,opencode,rag,squid" ]
   [[ "$output" != *'"'* ]]
 }
 
@@ -357,7 +357,7 @@ SRC='source "$ENTRYPOINT"'
 @test "apply_policy_env: matches the real opencode/policy.yaml shipped in this repo" {
   run bash -c "$SRC"'; apply_policy_env "'"$REPO_ROOT"'/opencode/policy.yaml"; printf "%s|%s" "$OPENCODE_DISABLE_TELEMETRY" "$NO_PROXY"'
   [ "$status" -eq 0 ]
-  [ "$output" = "1|localhost,127.0.0.1,::1,opencode,rag,squid,.local" ]
+  [ "$output" = "1|localhost,127.0.0.1,::1,opencode,rag,squid" ]
 }
 
 # --- extra_instruction_paths() --------------------------------------------
@@ -490,11 +490,16 @@ SRC='source "$ENTRYPOINT"'
   [ "$status" -ne 0 ]
 }
 
-@test "mcp_credentials_present: git-remote service (needs_user=1) also requires <SVC>_USER" {
-  run bash -c "$SRC"'; BITBUCKET_BASE_URL=http://b BITBUCKET_PAT=t mcp_credentials_present bitbucket 1'
+@test "mcp_credentials_present: needs_user=1 service (GitLab) also requires <SVC>_USER" {
+  run bash -c "$SRC"'; GITLAB_BASE_URL=http://g GITLAB_PAT=t mcp_credentials_present gitlab 1'
   [ "$status" -ne 0 ]   # user missing -> not up
-  run bash -c "$SRC"'; BITBUCKET_BASE_URL=http://b BITBUCKET_PAT=t BITBUCKET_USER=me mcp_credentials_present bitbucket 1'
+  run bash -c "$SRC"'; GITLAB_BASE_URL=http://g GITLAB_PAT=t GITLAB_USER=me mcp_credentials_present gitlab 1'
   [ "$status" -eq 0 ]   # user present -> up
+}
+
+@test "mcp_credentials_present: Bitbucket (needs_user=0, Bearer REST) is up without <SVC>_USER" {
+  run bash -c "$SRC"'; BITBUCKET_BASE_URL=http://b BITBUCKET_PAT=t mcp_credentials_present bitbucket 0'
+  [ "$status" -eq 0 ]
 }
 
 @test "mcp_credentials_present: an entirely unconfigured service is not up" {

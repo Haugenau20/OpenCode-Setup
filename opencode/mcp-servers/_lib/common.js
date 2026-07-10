@@ -66,7 +66,10 @@ export function bearerAuth(pat) {
     return `Bearer ${pat}`;
 }
 
-/** `Authorization: Basic <base64(user:pat)>` — Bitbucket's REST API. */
+/** `Authorization: Basic <base64(user:pat)>` — general HTTP Basic builder.
+ * (Bitbucket's REST API moved to a Bearer PAT; git-over-HTTP still uses Basic,
+ * but that lives in the entrypoint's credential helper, not a server. Kept as a
+ * general-purpose builder alongside bearerAuth/privateTokenAuth.) */
 export function basicAuth(user, pat) {
     return `Basic ${Buffer.from(`${user}:${pat}`).toString("base64")}`;
 }

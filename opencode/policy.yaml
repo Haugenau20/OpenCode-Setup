@@ -17,6 +17,12 @@ env:
   npm_config_audit: "false"
   npm_config_fund: "false"
 
-  # Force all egress through squid. NO_PROXY covers loopback + the docker
-  # internal network so sidecar MCPs aren't routed through the proxy.
-  NO_PROXY: "localhost,127.0.0.1,::1,opencode,rag,squid,.local"
+  # Force all egress through squid. NO_PROXY lists ONLY loopback + the docker
+  # internal sidecar names (opencode, rag, squid) so their traffic isn't routed
+  # through the proxy. Do NOT add `.local` (or any corp domain suffix) here: an
+  # internal service addressed by a *.local FQDN — e.g. bitbucket.corp.local —
+  # would then match NO_PROXY and be routed DIRECTLY, bypassing squid. The
+  # container has no direct egress, so git/curl to that host fail ("could not
+  # resolve host"); only the MCP survives, because undici's ProxyAgent ignores
+  # NO_PROXY. Everything external must go through squid.
+  NO_PROXY: "localhost,127.0.0.1,::1,opencode,rag,squid"

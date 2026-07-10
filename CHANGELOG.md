@@ -27,12 +27,32 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
-## [0.0.9] — 2026-07-10
+## [0.1.0] — 2026-07-10
 
-**Action required:** re-pull image. The default theme name changed from `corp`
-to `corp-dark`; if you pointed your own `tui.json`'s `theme` field (or a
-`disabled.yaml` `themes:` entry) at `corp`, update it to `corp-dark` or
-`corp-light`.
+**Action required:** re-pull image + recreate the stack (the `NO_PROXY`, Squid
+`append_domain`, and theme changes ship in the images / `docker-compose.yml`),
+then review .env. The default theme name changed from `corp` to `corp-dark` —
+update any `tui.json` `theme` field or `disabled.yaml` `themes:` entry that
+pointed at `corp` to `corp-dark` or `corp-light`. `BITBUCKET_USER` is now
+optional for the MCP (Bearer) but still required for git-over-HTTPS; consider
+pointing `BITBUCKET_BASE_URL` at your canonical HTTPS endpoint and setting the
+new optional `BITBUCKET_LEGACY_URL`.
+
+### Added
+- **`BITBUCKET_LEGACY_URL` (optional)** — when set to a legacy Bitbucket URL that
+  redirects to `BITBUCKET_BASE_URL` (typically the plain-HTTP connector on
+  `:7990`), the entrypoint bakes a git `url.<canonical>.insteadOf <legacy>`
+  rewrite into the container `.gitconfig`. A repo remote still pointing at the
+  legacy URL is transparently upgraded before git connects, so the server's
+  HTTP→HTTPS redirect no longer surfaces as an interactive
+  `Username for 'https://…:8443'` prompt. No-op when unset.
+- **Squid `append_domain`** — `squid.conf` now appends the internal domain
+  (`.corp.local`; set it to yours) to bare hostnames, so clients can reach
+  internal services by short name (e.g. `mybitbucket`) instead of `503`-ing at
+  the proxy. Squid ignores the resolv.conf `search` list (it uses its own
+  resolver), so this lives in `squid.conf`, not a compose `dns_search`. Only
+  dotless names are affected; FQDNs, the LLM endpoint, and the egress allowlist
+  are unchanged (the allowlist matches the requested name, before DNS).
 
 ### Changed
 - **Split the bundled `corp` theme into separate `corp-dark` and `corp-light`
@@ -42,6 +62,36 @@ to `corp-dark`; if you pointed your own `tui.json`'s `theme` field (or a
   self-contained theme with its own `defs`/`theme` blocks, so either can be
   selected directly by name. `tui.json`'s default `theme` is now `corp-dark`
   (previously `corp`).
+- **Bitbucket MCP now authenticates with a Bearer PAT** (Bitbucket Data Center
+  HTTP access token) instead of HTTP Basic, matching Jira/JFrog/Confluence.
+  `BITBUCKET_USER` is no longer required to enable the MCP — it is optional and
+  consumed only by the git credential helper for git-over-HTTPS. Existing setups
+  with the full trio keep working unchanged.
+- **`.env.example` now defaults `BITBUCKET_BASE_URL` to HTTPS** and the docs
+  steer toward the canonical HTTPS endpoint; the plain-HTTP connector still works
+  for the REST API but is the source of the redirect prompt above.
+- **Git credential helper now answers for the bare hostname too.** It matches
+  both the FQDN (`mybitbucket.corp.local`) and its short first-label form
+  (`mybitbucket`), so a remote using the short name (resolved by Squid's
+  `append_domain`) authenticates instead of falling back to an interactive
+  `Username for …` prompt. Still requires `BITBUCKET_USER`/`GITLAB_USER` —
+  git-over-HTTPS is HTTP Basic and needs a username.
+
+### Fixed
+- **Removed `.local` from `NO_PROXY`** (`docker-compose.yml` + `policy.yaml`).
+  It matched internal FQDNs like `bitbucket.corp.local`, forcing `git`/`curl` to
+  bypass squid and connect directly — which fails, since the container has no
+  direct egress (`could not resolve host` / `CONNECT tunnel failed`). The MCP
+  masked this by using undici's `ProxyAgent`, which ignores `NO_PROXY`. With
+  `.local` gone, all clients route corp `*.local` hosts through squid, so
+  git-over-HTTPS (and manual curl) reach Bitbucket like the MCP already does.
+
+### Docs
+- **TROUBLESHOOTING.md** — new entries for the per-user
+  `Username for 'https://…:8443'` git prompt (a Bitbucket base-URL redirect
+  surfaced by the repo's git remote, not `BITBUCKET_BASE_URL`) and for the
+  "could not resolve host / CONNECT tunnel failed" `NO_PROXY` bypass, each with
+  confirm/fix steps.
 
 ## [0.0.8] — 2026-07-09
 

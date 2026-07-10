@@ -76,7 +76,7 @@ disabled_for() {
 # SINGLE source of truth for "is service X up", used both to gate that service's
 # companion skill (via skill_gate_ok below) and to actually wire the server into
 # opencode.json (§4b) — so the two can never disagree. Reads <SVC>_BASE_URL /
-# <SVC>_PAT / <SVC>_USER (only when needs_user=1, i.e. it's also a git remote) /
+# <SVC>_PAT / <SVC>_USER (only when needs_user=1) /
 # DISABLE_<SVC>_MCP straight from the environment. Pure (no globals) → testable.
 mcp_credentials_present() {
     local svc="$1" needs_user="$2"
@@ -316,15 +316,18 @@ PLUGINS_ENABLED_SET="${PLUGINS_ENABLED_SET//\"/}"
 PLUGINS_ENABLED_SET="${PLUGINS_ENABLED_SET//\'/}"
 
 # One row per first-party MCP service: "<name>:<needs_user>". needs_user=1 means
-# the service is also a git remote and authenticates HTTP Basic, so it also
-# requires <SVC>_USER (Bitbucket, GitLab); needs_user=0 means API-only — no git
-# transport, PAT as a Bearer token, no username (Jira, JFrog, Confluence). Every
-# service still gates on <SVC>_BASE_URL + <SVC>_PAT + DISABLE_<SVC>_MCP != 1.
-# This table is the ONE source both this gate and the §4b config-wiring loop
-# walk. Adding service #6 is: drop the server dir under mcp-servers/, add its
-# squid allowlist conf, add one row here, add its keys to .env.example AND
-# opencode/manifest.json (see MAINTAINERS.md).
-MCP_SERVICES="bitbucket:1 jira:0 gitlab:1 jfrog:0 confluence:0"
+# the MCP gate additionally requires <SVC>_USER. Only GitLab is 1: it doubles as
+# a git remote and its gate still demands a username (unchanged). needs_user=0
+# means the PAT alone enables the MCP: Jira/JFrog/Confluence are API-only Bearer
+# services, and Bitbucket — though it is also a git remote — now authenticates
+# its REST API with a Bearer PAT too, so BITBUCKET_USER is optional and consumed
+# only by the §6 git credential helper when present. Every service still gates on
+# <SVC>_BASE_URL + <SVC>_PAT + DISABLE_<SVC>_MCP != 1. This table is the ONE
+# source both this gate and the §4b config-wiring loop walk. Adding service #6
+# is: drop the server dir under mcp-servers/, add its squid allowlist conf, add
+# one row here, add its keys to .env.example AND opencode/manifest.json (see
+# MAINTAINERS.md).
+MCP_SERVICES="bitbucket:0 jira:0 gitlab:1 jfrog:0 confluence:0"
 
 # Enabled MCP servers: those whose credentials are present and not disabled —
 # the SAME predicate §4b uses to actually wire them in (mcp_credentials_present),
@@ -528,7 +531,7 @@ export OPENCODE_CONFIG="${USER_CFG}/opencode.json"
 STATE_DIR=/home/dev/.local/share/opencode
 chown -R "${HOST_UID}:${HOST_GID}" "${STATE_DIR}" "${USER_CFG}"
 
-# ---- 6. Git credential helper: host-aware dispatch for multi-host creds ------
+# ---- 6. Git credential helper (multi-host) + optional legacy-URL rewrite -----
 # Bitbucket and GitLab each hand out their own PAT, and both can be configured
 # at once. A single unconditional helper (the old behavior) would echo ONE
 # service's creds for every host — e.g. leaking Bitbucket creds to a GitLab
@@ -544,29 +547,58 @@ chown -R "${HOST_UID}:${HOST_GID}" "${STATE_DIR}" "${USER_CFG}"
 bb_host="${BITBUCKET_BASE_URL:-}"; bb_host="${bb_host#*://}"; bb_host="${bb_host%%/*}"; bb_host="${bb_host%%:*}"
 gl_host="${GITLAB_BASE_URL:-}";    gl_host="${gl_host#*://}";    gl_host="${gl_host%%/*}";    gl_host="${gl_host%%:*}"
 
-if { [ -n "${BITBUCKET_USER:-}" ] && [ -n "${BITBUCKET_PAT:-}" ]; } \
-   || { [ -n "${GITLAB_USER:-}" ] && [ -n "${GITLAB_PAT:-}" ]; }; then
+# Optional legacy->canonical git URL rewrite (get ahead of the Bitbucket
+# base-URL redirect). When BITBUCKET_LEGACY_URL is set — typically the plain-HTTP
+# connector (http://host:7990) that the server 301-redirects to its canonical
+# HTTPS base URL — bake a git `url.<canonical>.insteadOf <legacy>` so a repo
+# remote still pointing at the legacy URL is rewritten to BITBUCKET_BASE_URL
+# *before* git connects. No redirect happens, the credential helper below still
+# matches the (unchanged) bare host, and git never falls back to an interactive
+# "Username for 'https://…'" prompt. Normalize both to exactly one trailing slash
+# so the prefix match is clean. Guaranteed no-op when the var is unset.
+bb_url_from="${BITBUCKET_LEGACY_URL:-}"
+bb_url_to="${BITBUCKET_BASE_URL:-}"
+url_rewrite=0
+if [ -n "${bb_url_from}" ] && [ -n "${bb_url_to}" ]; then
+    bb_url_from="${bb_url_from%/}/"
+    bb_url_to="${bb_url_to%/}/"
+    url_rewrite=1
+fi
 
-    # Build the `case` arms for only the services that are actually configured.
-    # git config values cannot span physical lines (without a trailing `\`
-    # continuation), so the whole helper function must end up as ONE line in
-    # the written .gitconfig — arms are joined with `;` rather than newlines.
-    #
-    # NOTE: this is shell building shell — `cred_arms` is itself a fragment of
-    # the `!f() { ... }; f` function that ends up literally inside the written
-    # .gitconfig. Below, `\$host` / `\${host%%:*}` / etc. are escaped (leading
-    # backslash) so they stay literal $-expansions in the GENERATED helper
-    # (evaluated later, when git invokes it) — while ${bb_host} / ${BITBUCKET_USER}
-    # / etc. (no backslash) expand NOW, at generation time, baking the real
-    # hostnames/creds into the file.
-    cred_arms=""
-    if [ -n "${BITBUCKET_USER:-}" ] && [ -n "${BITBUCKET_PAT:-}" ]; then
-        cred_arms="${cred_arms}${bb_host}) echo username=${BITBUCKET_USER}; echo password=\${BITBUCKET_PAT} ;; "
-    fi
-    if [ -n "${GITLAB_USER:-}" ] && [ -n "${GITLAB_PAT:-}" ]; then
-        cred_arms="${cred_arms}${gl_host}) echo username=${GITLAB_USER}; echo password=\${GITLAB_PAT} ;; "
-    fi
+# Build the credential `case` arms for only the services that are actually
+# configured.
+#
+# NOTE: this is shell building shell — `cred_arms` is itself a fragment of the
+# `!f() { ... }; f` function that ends up literally inside the written
+# .gitconfig. git config values cannot span physical lines, so that helper must
+# be ONE line — arms are joined with `;` rather than newlines. Below, `\$host` /
+# `\${host%%:*}` / etc. are escaped (leading backslash) so they stay literal
+# $-expansions in the GENERATED helper (evaluated later, when git invokes it) —
+# while ${bb_host} / ${BITBUCKET_USER} / etc. (no backslash) expand NOW, at
+# generation time, baking the real hostnames/creds into the file.
+# Match BOTH the FQDN and the bare first-label hostname, so a remote that uses
+# the short name (e.g. `mybitbucket`, resolved by Squid's append_domain) gets
+# creds just like the FQDN form. git sends the LITERAL requested host to the
+# helper — append_domain only affects Squid's DNS, not what git asks for — so the
+# helper itself must accept both. `a|b` is a case-pattern alternation baked in at
+# generation time; the guard skips a useless `x|x` when the host has no dots.
+bb_short="${bb_host%%.*}"
+gl_short="${gl_host%%.*}"
+cred_arms=""
+if [ -n "${BITBUCKET_USER:-}" ] && [ -n "${BITBUCKET_PAT:-}" ]; then
+    bb_pat="${bb_host}"; [ "${bb_short}" != "${bb_host}" ] && bb_pat="${bb_host}|${bb_short}"
+    cred_arms="${cred_arms}${bb_pat}) echo username=${BITBUCKET_USER}; echo password=\${BITBUCKET_PAT} ;; "
+fi
+if [ -n "${GITLAB_USER:-}" ] && [ -n "${GITLAB_PAT:-}" ]; then
+    gl_pat="${gl_host}"; [ "${gl_short}" != "${gl_host}" ] && gl_pat="${gl_host}|${gl_short}"
+    cred_arms="${cred_arms}${gl_pat}) echo username=${GITLAB_USER}; echo password=\${GITLAB_PAT} ;; "
+fi
 
+# Write ~/.gitconfig when there's anything to put in it: a credential helper
+# (Bitbucket/GitLab creds present) and/or a git URL rewrite. Each section is
+# emitted only when its inputs exist, so a creds-only or rewrite-only setup gets
+# exactly what it needs and nothing more.
+if [ -n "${cred_arms}" ] || [ "${url_rewrite}" = "1" ]; then
     # Default [user] identity: prefer the explicit GIT_USER_NAME/EMAIL, else
     # fall back to whichever service is configured (Bitbucket first, to match
     # prior behavior when both are set).
@@ -576,11 +608,24 @@ if { [ -n "${BITBUCKET_USER:-}" ] && [ -n "${BITBUCKET_PAT:-}" ]; } \
 [user]
     name = ${GIT_USER_NAME:-${default_user}}
     email = ${GIT_USER_EMAIL:-${default_user}@localhost}
-[credential]
-    helper = "!f() { host=\$(sed -n 's/^host=//p' | head -n1); host=\${host%%:*}; case \"\$host\" in ${cred_arms}*) ;; esac; }; f"
 [safe]
     directory = /workspace
 EOF
+
+    if [ -n "${cred_arms}" ]; then
+        cat >> /home/dev/.gitconfig <<EOF
+[credential]
+    helper = "!f() { host=\$(sed -n 's/^host=//p' | head -n1); host=\${host%%:*}; case \"\$host\" in ${cred_arms}*) ;; esac; }; f"
+EOF
+    fi
+
+    if [ "${url_rewrite}" = "1" ]; then
+        cat >> /home/dev/.gitconfig <<EOF
+[url "${bb_url_to}"]
+    insteadOf = ${bb_url_from}
+EOF
+    fi
+
     chown "${HOST_UID}:${HOST_GID}" /home/dev/.gitconfig
 fi
 

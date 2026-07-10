@@ -188,7 +188,7 @@ if docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
     # Same table as opencode/entrypoint.sh §4b: "<name>:<needs_user>". Mirror
     # it here so "add service #6" stays a one-row diff in both places instead
     # of two hand-written gate copies drifting apart.
-    MCP_SERVICES="bitbucket:1 jira:0 gitlab:1 jfrog:0 confluence:0"
+    MCP_SERVICES="bitbucket:0 jira:0 gitlab:1 jfrog:0 confluence:0"
 
     for entry in ${MCP_SERVICES}; do
         svc="${entry%%:*}"
