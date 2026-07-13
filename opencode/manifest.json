@@ -18,6 +18,8 @@
     {"key": "JFROG_PAT", "required": false},
     {"key": "CONFLUENCE_BASE_URL", "required": false},
     {"key": "CONFLUENCE_PAT", "required": false},
+    {"key": "MFILES_BASE_URL", "required": false},
+    {"key": "MFILES_PAT", "required": false},
     {"key": "GIT_USER_NAME", "required": false},
     {"key": "GIT_USER_EMAIL", "required": false},
     {"key": "ALLOW_REMOTE_GIT", "required": false},
@@ -26,10 +28,11 @@
     {"key": "DISABLE_GITLAB_MCP", "required": false},
     {"key": "DISABLE_JFROG_MCP", "required": false},
     {"key": "DISABLE_CONFLUENCE_MCP", "required": false},
+    {"key": "DISABLE_MFILES_MCP", "required": false},
     {"key": "ENABLED_PLUGINS", "required": false},
     {"key": "HOST_UID", "required": false},
     {"key": "HOST_GID", "required": false}
   ],
-  "mcps": ["bitbucket", "gitlab", "jira", "jfrog", "confluence"],
+  "mcps": ["bitbucket", "gitlab", "jira", "jfrog", "confluence", "mfiles"],
   "plugins": ["superpowers", "dcp", "opencode-workspace", "opencode-pty"]
 }

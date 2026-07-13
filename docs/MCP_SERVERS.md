@@ -1,10 +1,10 @@
-# MCP servers (Bitbucket, GitLab, Jira, JFrog & Confluence)
+# MCP servers (Bitbucket, GitLab, Jira, JFrog, Confluence & M-Files)
 
-The image ships five first-party, **read-only** MCP servers that let the agent
-query the internal Bitbucket, GitLab, Jira, JFrog Artifactory, and Confluence
-instances directly — all already on the Squid allowlist. They are `type: local`
-stdio servers (`node`), with their runtime deps vendored at build time so nothing
-hits npm at container start.
+The image ships six first-party, **read-only** MCP servers that let the agent
+query the internal Bitbucket, GitLab, Jira, JFrog Artifactory, Confluence, and
+M-Files instances directly — all already on the Squid allowlist. They are
+`type: local` stdio servers (`node`), with their runtime deps vendored at build
+time so nothing hits npm at container start.
 
 - **Bitbucket** (`opencode/mcp-servers/bitbucket/`): `list_projects`,
   `list_repos`, `get_commits`, `get_pull_requests`, `get_pull_request`,
@@ -27,6 +27,11 @@ hits npm at container start.
   `get_current_user`. This is the *documentation/wiki* plane — pages live in a
   **space** (by space key) and form a tree of numeric **content ids**. For
   issues use Jira; for source use GitLab/Bitbucket.
+- **M-Files** (`opencode/mcp-servers/mfiles/`): `list_object_types`,
+  `list_classes`, `search_objects`, `get_object`, `get_object_properties`,
+  `get_file_content`. This is the *document-management* (DMS) plane — objects
+  are addressed by an **object type id** + **object id**, not a file path. Use
+  Jira for issues, GitLab/Bitbucket for source, and Confluence for wiki pages.
 
 Read-only by design — there is no push/comment/deploy capability, mirroring the
 `git:ro`-by-default posture. Every tool issues GETs **except** JFrog's
@@ -37,8 +42,8 @@ is still strictly read-only. To keep an unbounded query from scanning a large
 (1M+ item) instance, `aql_search` enforces a `.limit()` and caps returned rows.
 
 Bitbucket and GitLab additionally double as **git remotes** over HTTPS (clone/push);
-see [`docs/ALLOWING_GIT_PUSH.md`](ALLOWING_GIT_PUSH.md). Jira, JFrog and Confluence
-have no git transport — they are API-only.
+see [`docs/ALLOWING_GIT_PUSH.md`](ALLOWING_GIT_PUSH.md). Jira, JFrog, Confluence
+and M-Files have no git transport — they are API-only.
 
 ## Enabling them
 
@@ -53,6 +58,7 @@ independent — you can have API access without git, or vice versa.
 | Jira      | `JIRA_BASE_URL`, `JIRA_PAT`                         | `DISABLE_JIRA_MCP=1`    |
 | JFrog     | `JFROG_BASE_URL`, `JFROG_PAT`                       | `DISABLE_JFROG_MCP=1`   |
 | Confluence| `CONFLUENCE_BASE_URL`, `CONFLUENCE_PAT`            | `DISABLE_CONFLUENCE_MCP=1` |
+| M-Files   | `MFILES_BASE_URL`, `MFILES_PAT`                     | `DISABLE_MFILES_MCP=1`  |
 
 Credential presence is the gate because the servers **exit on boot** without
 their env; registering one with no creds would just produce a noisy failed
@@ -83,10 +89,15 @@ the scheme its server expects (verified against the live instances):
 - **Confluence** (Data Center) — the PAT is presented as a **Bearer** token
   (`Authorization: Bearer <CONFLUENCE_PAT>`); no username is involved, same shape
   as Jira. The server appends `/rest/api` to `CONFLUENCE_BASE_URL`.
+- **M-Files** — the PAT is presented via a **custom `X-Authentication`**
+  header (`X-Authentication: <MFILES_PAT>`) — not Authorization/Bearer, not
+  Basic; no username is involved. This is the first server to use this scheme.
+  The server appends `/REST` to `MFILES_BASE_URL`.
 
 Each server reads the **canonical `.env` names directly** (`BITBUCKET_*`,
-`GITLAB_*`, `JIRA_*`, `JFROG_*`, `CONFLUENCE_*`) and builds its own auth header at
-startup. `.env` therefore never contains a pre-encoded blob; you only paste the PAT.
+`GITLAB_*`, `JIRA_*`, `JFROG_*`, `CONFLUENCE_*`, `MFILES_*`) and builds its own
+auth header at startup. `.env` therefore never contains a pre-encoded blob; you
+only paste the PAT.
 
 This matters for *where the values live*. Compose loads `.env` via `env_file`,
 so those vars are part of the **container's stored environment** and are
@@ -121,6 +132,10 @@ when a service's credential trio is present. All egress goes through Squid.
 > port: `http://confluence.internal.example:8090` (no trailing slash). That port
 > must be in **both** `Safe_ports` and `SSL_ports` in `squid.conf` — see the
 > CONNECT note below for why even a plain-HTTP target needs `SSL_ports`.
+>
+> **`MFILES_BASE_URL` is HTTPS, the site base** — the server appends `/REST`
+> itself, so set it to e.g. `https://mfiles.internal.example` (no trailing
+> slash).
 
 ## Proxy ports: every MCP target port must be in `SSL_ports`
 
@@ -191,8 +206,13 @@ verification.
   (`get_page_children`), or discovering spaces (`list_spaces`). A common
   cross-reference is **Jira → Confluence**: from a ticket to its linked spec or
   runbook page.
+- The **`mfiles-fetch`** skill drives the M-Files tools for document-management
+  lookups — discovering object types/classes (`list_object_types`,
+  `list_classes`), free-text search (`search_objects`), fetching an object's
+  metadata and file list (`get_object` / `get_object_properties`), and
+  downloading an attached file (`get_file_content`).
 
-All five degrade gracefully when their MCP is disabled.
+All six degrade gracefully when their MCP is disabled.
 
 ## Adding another service later
 

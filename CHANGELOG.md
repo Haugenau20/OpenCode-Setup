@@ -27,6 +27,34 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
+## [Unreleased]
+
+**Action required:** re-pull image + rebuild squid + edit .env (new MCP credentials)
+
+### Added
+- Read-only **M-Files MCP server** (`opencode/mcp-servers/mfiles/`), vendored
+  into the image and auto-enabled when `MFILES_BASE_URL` + `MFILES_PAT` are
+  present in `.env` (force off with `DISABLE_MFILES_MCP=1`). M-Files is API-only
+  (no git transport), so it follows the Jira/JFrog/Confluence recipe — a
+  two-value `MFILES_{BASE_URL,PAT}` pair — but is the **first server to use a
+  custom `X-Authentication` header** for the PAT (not Authorization/Bearer, not
+  Basic, no username); the server appends `/REST` to the base URL. Tools:
+  `list_object_types`, `list_classes`, `search_objects`, `get_object`,
+  `get_object_properties`, `get_file_content`.
+- **`mfiles-fetch`** skill driving the new tools for document-management (DMS)
+  lookups (discover object types, search, fetch an object with its properties
+  and files, download file content).
+- New `xAuthenticationAuth()` builder in `opencode/mcp-servers/_lib/common.js`.
+- Squid allowlist entry `squid/allowlist.d/60-mfiles.conf` for the M-Files host
+  (HTTPS/443 — non-standard ports go in `squid.conf` `SSL_ports`).
+
+### Changed
+- `.env.example` gains an M-Files block and `DISABLE_MFILES_MCP`.
+- `scripts/doctor.sh` `MCP_SERVICES` table adds `mfiles:0`, so the health check
+  verifies the M-Files MCP wiring too.
+- Docs (`docs/MCP_SERVERS.md`, `opencode/bundle/AGENTS.md`) and
+  `opencode/manifest.json` updated to cover six MCP servers.
+
 ## [0.1.0] — 2026-07-10
 
 **Action required:** re-pull image + recreate the stack (the `NO_PROXY`, Squid
