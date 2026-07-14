@@ -47,6 +47,13 @@ up. The vocabulary:
 - New `xAuthenticationAuth()` builder in `opencode/mcp-servers/_lib/common.js`.
 - Squid allowlist entry `squid/allowlist.d/60-mfiles.conf` for the M-Files host
   (HTTPS/443 — non-standard ports go in `squid.conf` `SSL_ports`).
+- **"Getting an M-Files authentication token"** section in `docs/MCP_SERVERS.md`
+  covering how to mint `MFILES_PAT` — unlike the other services, the
+  `X-Authentication` value is a session token you obtain by POSTing vault
+  credentials to `/REST/server/authenticationtokens.aspx` (incl. finding the
+  vault GUID, the `Expiration`/`ReadOnly` fields, token-expiry `401`/`403`
+  symptoms, and doing it through the container's Squid proxy). `.env.example`
+  points at it.
 
 ### Changed
 - `.env.example` gains an M-Files block and `DISABLE_MFILES_MCP`.

@@ -137,6 +137,86 @@ when a service's credential trio is present. All egress goes through Squid.
 > itself, so set it to e.g. `https://mfiles.internal.example` (no trailing
 > slash).
 
+## Getting an M-Files authentication token (`MFILES_PAT`)
+
+M-Files is the one service where you **mint the token yourself** rather than
+copy it from a web UI. The other five expose a "create personal access token"
+button; M-Files' `X-Authentication` value is instead a **session
+authentication token** you obtain by POSTing your vault credentials to the Web
+Service and reading back the `Value` it returns. That returned string is what
+goes in `MFILES_PAT` — the MCP sends it verbatim as the `X-Authentication`
+header on every request.
+
+The token is scoped to a **single vault**, identified by its GUID. If you
+already know the GUID (M-Files Admin shows it on the vault's properties), skip
+to step 2.
+
+### 1. Find the vault GUID (if you don't have it)
+
+Authenticate at the *server* level — omit `VaultGuid` — then list the vaults:
+
+```bash
+# server-level token (no VaultGuid)
+curl -sS -X POST https://mfiles.internal.example/REST/server/authenticationtokens.aspx \
+  -H 'Content-Type: application/json' \
+  -d '{"Username":"you","Password":"secret"}'
+# → {"Value":"<server-token>"}
+
+curl -sS https://mfiles.internal.example/REST/server/vaults.aspx \
+  -H 'X-Authentication: <server-token>'
+# → [ { "Name": "My Vault", "GUID": "{C540...}", ... }, ... ]
+```
+
+### 2. Mint the vault token
+
+POST the same credentials **plus** the `VaultGuid`:
+
+```bash
+curl -sS -X POST https://mfiles.internal.example/REST/server/authenticationtokens.aspx \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "Username":  "you",
+        "Password":  "secret",
+        "VaultGuid": "{C540...}"
+      }'
+# → {"Value":"<vault-token>"}
+```
+
+Paste that `Value` into `MFILES_PAT` in `.env`. Done — no encoding, no
+username stored (the credentials only ever touch this one-time exchange).
+
+### Optional body fields worth knowing
+
+- **`Expiration`** — an ISO-8601 datetime. Without it the token follows the
+  vault's default lifetime, and M-Files session tokens **can expire**. So if
+  the MCP starts returning `401`/`403` after having worked, the most likely
+  cause is a lapsed token: re-mint it (step 2) and update `.env`. Set a distant
+  `Expiration` for a long-lived token if your vault policy permits.
+- **`ReadOnly: true`** — requests a read-only token. A good fit here: the MCP
+  only ever issues GETs, so a read-only token can't be used to write even if
+  the value leaks.
+- **`Domain`** — for Windows/AD authentication instead of an M-Files-native
+  account.
+
+### Minting it through the container's proxy
+
+The commands above assume you can reach M-Files directly (e.g. from a corp
+workstation) — the simplest place to do this. To instead mint it from **inside
+the running container**, over the exact same Squid path the MCP uses, force the
+proxy the way the MCP's client does (undici ignores `NO_PROXY`; curl doesn't,
+so clear it):
+
+```bash
+env no_proxy= NO_PROXY= curl -sS -x http://squid:3128 \
+  -X POST https://mfiles.internal.example/REST/server/authenticationtokens.aspx \
+  -H 'Content-Type: application/json' \
+  -d '{"Username":"you","Password":"secret","VaultGuid":"{C540...}"}'
+```
+
+If that returns a `Value`, the host is allowlisted and its port is in
+`SSL_ports`, so the MCP will authenticate too. A `403` on the `CONNECT` instead
+means the port is missing from `SSL_ports` — see the next section.
+
 ## Proxy ports: every MCP target port must be in `SSL_ports`
 
 This is the non-obvious one, and it has burned at least one afternoon of
