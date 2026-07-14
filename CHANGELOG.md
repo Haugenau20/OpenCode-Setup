@@ -50,10 +50,10 @@ up. The vocabulary:
 - **"Getting an M-Files authentication token"** section in `docs/MCP_SERVERS.md`
   covering how to mint `MFILES_PAT` — unlike the other services, the
   `X-Authentication` value is a session token you obtain by POSTing vault
-  credentials to `/REST/server/authenticationtokens.aspx` (incl. finding the
-  vault GUID, the `Expiration`/`ReadOnly` fields, token-expiry `401`/`403`
-  symptoms, and doing it through the container's Squid proxy). `.env.example`
-  points at it.
+  credentials to `/REST/server/authenticationtokens` (incl. reading the vault
+  GUID from M-Files Desktop Settings, the `Domain`/`Expiration`/`ReadOnly`
+  fields, token-expiry `401`/`403` symptoms, and doing it through the
+  container's Squid proxy). `.env.example` points at it.
 
 ### Changed
 - `.env.example` gains an M-Files block and `DISABLE_MFILES_MCP`.

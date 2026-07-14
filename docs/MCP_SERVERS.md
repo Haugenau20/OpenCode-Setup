@@ -147,43 +147,42 @@ Service and reading back the `Value` it returns. That returned string is what
 goes in `MFILES_PAT` — the MCP sends it verbatim as the `X-Authentication`
 header on every request.
 
-The token is scoped to a **single vault**, identified by its GUID. If you
-already know the GUID (M-Files Admin shows it on the vault's properties), skip
-to step 2.
+The token is scoped to a **single vault**, identified by its GUID.
 
-### 1. Find the vault GUID (if you don't have it)
+> **This is the maintainer-facing summary.** End users of the launcher get a
+> friendlier version plus an interactive `./mfiles-token.sh` helper that does
+> the whole exchange for them — see "M-Files authentication token" in the
+> launcher's `docs/CUSTOMIZING.md`.
 
-Authenticate at the *server* level — omit `VaultGuid` — then list the vaults:
+### 1. Find the vault GUID
 
-```bash
-# server-level token (no VaultGuid)
-curl -sS -X POST https://mfiles.internal.example/REST/server/authenticationtokens.aspx \
-  -H 'Content-Type: application/json' \
-  -d '{"Username":"you","Password":"secret"}'
-# → {"Value":"<server-token>"}
+In the Windows system tray, **right-click the M-Files icon → Settings →
+M-Files Desktop Settings**. In the window that opens, the **"Document Vault on
+Server"** column shows the GUID in curly braces, e.g. `{C540E37E-...}`. Copy
+**only the ID inside the braces** — not the braces, not the rest of the cell.
 
-curl -sS https://mfiles.internal.example/REST/server/vaults.aspx \
-  -H 'X-Authentication: <server-token>'
-# → [ { "Name": "My Vault", "GUID": "{C540...}", ... }, ... ]
-```
+### 2. Mint the token
 
-### 2. Mint the vault token
-
-POST the same credentials **plus** the `VaultGuid`:
+POST your vault credentials plus the `VaultGuid` (note: the path is
+`/REST/server/authenticationtokens` — **no `.aspx`** needed):
 
 ```bash
-curl -sS -X POST https://mfiles.internal.example/REST/server/authenticationtokens.aspx \
+curl --fail-with-body -sS \
+  -X POST https://mfiles.internal.example/REST/server/authenticationtokens \
   -H 'Content-Type: application/json' \
   -d '{
         "Username":  "you",
         "Password":  "secret",
-        "VaultGuid": "{C540...}"
+        "Domain":    "CORP",
+        "VaultGuid": "C540E37E-..."
       }'
 # → {"Value":"<vault-token>"}
 ```
 
-Paste that `Value` into `MFILES_PAT` in `.env`. Done — no encoding, no
-username stored (the credentials only ever touch this one-time exchange).
+`Domain` is for Windows/AD authentication — leave it out (or empty) for
+M-Files-native accounts. Paste the returned `Value` into `MFILES_PAT` in
+`.env`. Done — no encoding, no username stored (the credentials only ever touch
+this one-time exchange).
 
 ### Optional body fields worth knowing
 
@@ -195,12 +194,10 @@ username stored (the credentials only ever touch this one-time exchange).
 - **`ReadOnly: true`** — requests a read-only token. A good fit here: the MCP
   only ever issues GETs, so a read-only token can't be used to write even if
   the value leaks.
-- **`Domain`** — for Windows/AD authentication instead of an M-Files-native
-  account.
 
 ### Minting it through the container's proxy
 
-The commands above assume you can reach M-Files directly (e.g. from a corp
+The command above assumes you can reach M-Files directly (e.g. from a corp
 workstation) — the simplest place to do this. To instead mint it from **inside
 the running container**, over the exact same Squid path the MCP uses, force the
 proxy the way the MCP's client does (undici ignores `NO_PROXY`; curl doesn't,
@@ -208,9 +205,9 @@ so clear it):
 
 ```bash
 env no_proxy= NO_PROXY= curl -sS -x http://squid:3128 \
-  -X POST https://mfiles.internal.example/REST/server/authenticationtokens.aspx \
+  -X POST https://mfiles.internal.example/REST/server/authenticationtokens \
   -H 'Content-Type: application/json' \
-  -d '{"Username":"you","Password":"secret","VaultGuid":"{C540...}"}'
+  -d '{"Username":"you","Password":"secret","VaultGuid":"C540E37E-..."}'
 ```
 
 If that returns a `Value`, the host is allowlisted and its port is in
