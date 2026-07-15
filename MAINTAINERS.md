@@ -10,34 +10,40 @@ truth. To cut a release, first bump `VERSION` to the next semver number (e.g.
 `0.2.0`), then the steps below read it back with `$(cat VERSION)`.
 
 ```
-# bump the VERSION file first, then load it here
-VERSION=$(cat VERSION)
+# 0. bump the VERSION file to the next semver, e.g.
+echo 0.2.0 > VERSION
 
-# 0. run the local gate — bash -n/shellcheck, JSON validity, node --check on
+# 1. run the local gate — bash -n/shellcheck, JSON validity, node --check on
 #    the MCP servers, and the bats suite under tests/; also runs the
 #    docker-dependent checks below (image builds, squid -k parse, the smoke
 #    test) if a Docker daemon is reachable, otherwise lists them as manual
 #    reminders. This is also what becomes the CI job once CI infra exists.
 ./scripts/check.sh
 
-# 1. update CHANGELOG.md: rename [Unreleased] to [$VERSION] with today's
+# 2. update CHANGELOG.md: rename [Unreleased] to [<VERSION>] with today's
 #    date, fill in the "Action required" line, and commit it (together with
 #    the VERSION bump).
-# 2. drop the real corp CA into ca/  (it's gitignored)
-# 3. build both images, tagged with the version. --build-arg IMAGE_VERSION on
-#    the opencode build stamps the OCI version label AND gets baked into
+# 3. drop the real corp CA into ca/  (it's gitignored)
+
+# 4. build, tag and push both images with one command. scripts/release.sh
+#    reads ./VERSION and passes it as the IMAGE_VERSION build arg — which stamps
+#    the opencode image's OCI version label AND is baked into
 #    /etc/opencode/manifest.json (the squid image carries neither — it has no
-#    manifest).
-docker build -f opencode/Dockerfile -t artifactory.internal.example/opencode-workplace:$VERSION \
-    --build-arg IMAGE_VERSION=$VERSION .
-docker build -f squid/Dockerfile    -t artifactory.internal.example/opencode-workplace-squid:$VERSION .
+#    manifest, its version travels only in the tag). Set IMAGE_REGISTRY once at
+#    the top of the script (or export it). Build+tag only:
+./scripts/release.sh
 
-# 4. smoke-test (see "Smoke test")
+# 5. smoke-test (see "Smoke test")
 
-# 5. push to artifactory
-docker push artifactory.internal.example/opencode-workplace:$VERSION
-docker push artifactory.internal.example/opencode-workplace-squid:$VERSION
+# 6. push to artifactory (asks for confirmation first). Add --latest to also
+#    move the `latest` tag so launcher users on IMAGE_TAG=latest pick it up.
+./scripts/release.sh --push --latest
 ```
+
+> The two `release.sh` runs rebuild the images; a build is cheap on Docker's
+> layer cache, but if you want to push exactly what you smoke-tested without a
+> rebuild you can `docker push` the tags it printed by hand. `--dry-run` prints
+> every docker command without running anything.
 
 Then tell developers: point their `.env` at `IMAGE_TAG=$VERSION` and link
 them to the CHANGELOG entry — the "Action required" line tells them whether

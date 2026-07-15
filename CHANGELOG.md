@@ -62,10 +62,13 @@ up. The vocabulary:
 - Docs (`docs/MCP_SERVERS.md`, `opencode/bundle/AGENTS.md`) and
   `opencode/manifest.json` updated to cover six MCP servers.
 - **New top-level `VERSION` file** holds the current release number as the
-  single source of truth; `MAINTAINERS.md`'s release flow now reads
-  `VERSION=$(cat VERSION)` and passes it as the `IMAGE_VERSION` build arg
-  instead of hand-typing the number. (Consumers pin with `IMAGE_TAG` as before —
-  no consumer action.)
+  single source of truth. A new **`scripts/release.sh`** reads it and does the
+  whole build → tag → push (opencode + squid images) in one command, passing the
+  version as the `IMAGE_VERSION` build arg so the image tag, OCI label, and
+  `/etc/opencode/manifest.json` can't drift. Push is gated behind `--push` (with
+  a confirmation prompt) and `--latest` moves the floating tag; `MAINTAINERS.md`
+  documents the new flow. (Consumers pin with `IMAGE_TAG` as before — no consumer
+  action.)
 - **`pty-sessions` skill** clarified: `pty_spawn`'s `command` must be something
   that keeps the terminal open (e.g. `bash`, not `echo hello`, which exits
   immediately), and driving a session via `pty_write` requires a trailing
