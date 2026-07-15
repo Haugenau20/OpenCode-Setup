@@ -1,10 +1,10 @@
-# MCP servers (Bitbucket, GitLab, Jira, JFrog & Confluence)
+# MCP servers (Bitbucket, GitLab, Jira, JFrog, Confluence & M-Files)
 
-The image ships five first-party, **read-only** MCP servers that let the agent
-query the internal Bitbucket, GitLab, Jira, JFrog Artifactory, and Confluence
-instances directly — all already on the Squid allowlist. They are `type: local`
-stdio servers (`node`), with their runtime deps vendored at build time so nothing
-hits npm at container start.
+The image ships six first-party, **read-only** MCP servers that let the agent
+query the internal Bitbucket, GitLab, Jira, JFrog Artifactory, Confluence, and
+M-Files instances directly — all already on the Squid allowlist. They are
+`type: local` stdio servers (`node`), with their runtime deps vendored at build
+time so nothing hits npm at container start.
 
 - **Bitbucket** (`opencode/mcp-servers/bitbucket/`): `list_projects`,
   `list_repos`, `get_commits`, `get_pull_requests`, `get_pull_request`,
@@ -27,6 +27,11 @@ hits npm at container start.
   `get_current_user`. This is the *documentation/wiki* plane — pages live in a
   **space** (by space key) and form a tree of numeric **content ids**. For
   issues use Jira; for source use GitLab/Bitbucket.
+- **M-Files** (`opencode/mcp-servers/mfiles/`): `list_object_types`,
+  `list_classes`, `search_objects`, `get_object`, `get_object_properties`,
+  `get_file_content`. This is the *document-management* (DMS) plane — objects
+  are addressed by an **object type id** + **object id**, not a file path. Use
+  Jira for issues, GitLab/Bitbucket for source, and Confluence for wiki pages.
 
 Read-only by design — there is no push/comment/deploy capability, mirroring the
 `git:ro`-by-default posture. Every tool issues GETs **except** JFrog's
@@ -37,8 +42,8 @@ is still strictly read-only. To keep an unbounded query from scanning a large
 (1M+ item) instance, `aql_search` enforces a `.limit()` and caps returned rows.
 
 Bitbucket and GitLab additionally double as **git remotes** over HTTPS (clone/push);
-see [`docs/ALLOWING_GIT_PUSH.md`](ALLOWING_GIT_PUSH.md). Jira, JFrog and Confluence
-have no git transport — they are API-only.
+see [`docs/ALLOWING_GIT_PUSH.md`](ALLOWING_GIT_PUSH.md). Jira, JFrog, Confluence
+and M-Files have no git transport — they are API-only.
 
 ## Enabling them
 
@@ -53,6 +58,7 @@ independent — you can have API access without git, or vice versa.
 | Jira      | `JIRA_BASE_URL`, `JIRA_PAT`                         | `DISABLE_JIRA_MCP=1`    |
 | JFrog     | `JFROG_BASE_URL`, `JFROG_PAT`                       | `DISABLE_JFROG_MCP=1`   |
 | Confluence| `CONFLUENCE_BASE_URL`, `CONFLUENCE_PAT`            | `DISABLE_CONFLUENCE_MCP=1` |
+| M-Files   | `MFILES_BASE_URL`, `MFILES_PAT`                     | `DISABLE_MFILES_MCP=1`  |
 
 Credential presence is the gate because the servers **exit on boot** without
 their env; registering one with no creds would just produce a noisy failed
@@ -83,10 +89,15 @@ the scheme its server expects (verified against the live instances):
 - **Confluence** (Data Center) — the PAT is presented as a **Bearer** token
   (`Authorization: Bearer <CONFLUENCE_PAT>`); no username is involved, same shape
   as Jira. The server appends `/rest/api` to `CONFLUENCE_BASE_URL`.
+- **M-Files** — the PAT is presented via a **custom `X-Authentication`**
+  header (`X-Authentication: <MFILES_PAT>`) — not Authorization/Bearer, not
+  Basic; no username is involved. This is the first server to use this scheme.
+  The server appends `/REST` to `MFILES_BASE_URL`.
 
 Each server reads the **canonical `.env` names directly** (`BITBUCKET_*`,
-`GITLAB_*`, `JIRA_*`, `JFROG_*`, `CONFLUENCE_*`) and builds its own auth header at
-startup. `.env` therefore never contains a pre-encoded blob; you only paste the PAT.
+`GITLAB_*`, `JIRA_*`, `JFROG_*`, `CONFLUENCE_*`, `MFILES_*`) and builds its own
+auth header at startup. `.env` therefore never contains a pre-encoded blob; you
+only paste the PAT.
 
 This matters for *where the values live*. Compose loads `.env` via `env_file`,
 so those vars are part of the **container's stored environment** and are
@@ -121,6 +132,87 @@ when a service's credential trio is present. All egress goes through Squid.
 > port: `http://confluence.internal.example:8090` (no trailing slash). That port
 > must be in **both** `Safe_ports` and `SSL_ports` in `squid.conf` — see the
 > CONNECT note below for why even a plain-HTTP target needs `SSL_ports`.
+>
+> **`MFILES_BASE_URL` is HTTPS, the site base** — the server appends `/REST`
+> itself, so set it to e.g. `https://mfiles.internal.example` (no trailing
+> slash).
+
+## Getting an M-Files authentication token (`MFILES_PAT`)
+
+M-Files is the one service where you **mint the token yourself** rather than
+copy it from a web UI. The other five expose a "create personal access token"
+button; M-Files' `X-Authentication` value is instead a **session
+authentication token** you obtain by POSTing your vault credentials to the Web
+Service and reading back the `Value` it returns. That returned string is what
+goes in `MFILES_PAT` — the MCP sends it verbatim as the `X-Authentication`
+header on every request.
+
+The token is scoped to a **single vault**, identified by its GUID.
+
+> **This is the maintainer-facing summary.** End users of the launcher get a
+> friendlier version plus an interactive `./mfiles-token.sh` helper that does
+> the whole exchange for them — see "M-Files authentication token" in the
+> launcher's `docs/CUSTOMIZING.md`.
+
+### 1. Find the vault GUID
+
+In the Windows system tray, **right-click the M-Files icon → Settings →
+M-Files Desktop Settings**. In the window that opens, the **"Document Vault on
+Server"** column shows the GUID in curly braces, e.g. `{C540E37E-...}`. Copy
+**only the ID inside the braces** — not the braces, not the rest of the cell.
+
+### 2. Mint the token
+
+POST your vault credentials plus the `VaultGuid` (note: the path is
+`/REST/server/authenticationtokens` — **no `.aspx`** needed):
+
+```bash
+curl --fail-with-body -sS \
+  -X POST https://mfiles.internal.example/REST/server/authenticationtokens \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "Username":  "you",
+        "Password":  "secret",
+        "Domain":    "CORP",
+        "VaultGuid": "C540E37E-..."
+      }'
+# → {"Value":"<vault-token>"}
+```
+
+`Domain` is for Windows/AD authentication — leave it out (or empty) for
+M-Files-native accounts. Paste the returned `Value` into `MFILES_PAT` in
+`.env`. Done — no encoding, no username stored (the credentials only ever touch
+this one-time exchange).
+
+### Optional body fields worth knowing
+
+- **`Expiration`** — an ISO-8601 datetime. Without it the token follows the
+  vault's default lifetime, and M-Files session tokens **can expire**. So if
+  the MCP starts returning `401`/`403` after having worked, the most likely
+  cause is a lapsed token: re-mint it (step 2) and update `.env`. Set a distant
+  `Expiration` for a long-lived token if your vault policy permits.
+- **`ReadOnly: true`** — requests a read-only token. A good fit here: the MCP
+  only ever issues GETs, so a read-only token can't be used to write even if
+  the value leaks.
+
+### Minting it through the container's proxy
+
+The command above assumes you can reach M-Files directly (e.g. from a corp
+workstation) — the simplest place to do this. To instead mint it from **inside
+the running container**, over the exact same Squid path the MCP uses, force the
+proxy the way the MCP's client does (undici ignores `NO_PROXY`; curl doesn't,
+so clear it):
+
+```bash
+env no_proxy= NO_PROXY= curl -sS -x http://squid:3128 \
+  -X POST https://mfiles.internal.example/REST/server/authenticationtokens \
+  -H 'Content-Type: application/json' \
+  -d '{"Username":"you","Password":"secret","VaultGuid":"C540E37E-..."}'
+```
+
+If that returns a `Value`, the host is allowlisted and its port is in
+`SSL_ports`, so the MCP will authenticate too. A `403` on the `CONNECT` instead
+means the port is missing from `SSL_ports` — see the next section.
 
 ## Proxy ports: every MCP target port must be in `SSL_ports`
 
@@ -191,8 +283,13 @@ verification.
   (`get_page_children`), or discovering spaces (`list_spaces`). A common
   cross-reference is **Jira → Confluence**: from a ticket to its linked spec or
   runbook page.
+- The **`mfiles-fetch`** skill drives the M-Files tools for document-management
+  lookups — discovering object types/classes (`list_object_types`,
+  `list_classes`), free-text search (`search_objects`), fetching an object's
+  metadata and file list (`get_object` / `get_object_properties`), and
+  downloading an attached file (`get_file_content`).
 
-All five degrade gracefully when their MCP is disabled.
+All six degrade gracefully when their MCP is disabled.
 
 ## Adding another service later
 

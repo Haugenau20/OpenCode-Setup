@@ -80,6 +80,12 @@ export function privateTokenAuth(pat) {
     return pat;
 }
 
+/** `X-Authentication: <token>` — M-Files Web Service REST API. No encoding;
+ * identity wrapper kept for symmetry with the other builders / call sites. */
+export function xAuthenticationAuth(token) {
+    return token;
+}
+
 // ---------------------------------------------------------------------------
 // HTTP helper
 // ---------------------------------------------------------------------------

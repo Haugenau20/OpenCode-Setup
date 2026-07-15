@@ -327,7 +327,7 @@ PLUGINS_ENABLED_SET="${PLUGINS_ENABLED_SET//\'/}"
 # is: drop the server dir under mcp-servers/, add its squid allowlist conf, add
 # one row here, add its keys to .env.example AND opencode/manifest.json (see
 # MAINTAINERS.md).
-MCP_SERVICES="bitbucket:0 jira:0 gitlab:1 jfrog:0 confluence:0"
+MCP_SERVICES="bitbucket:0 jira:0 gitlab:1 jfrog:0 confluence:0 mfiles:0"
 
 # Enabled MCP servers: those whose credentials are present and not disabled —
 # the SAME predicate §4b uses to actually wire them in (mcp_credentials_present),

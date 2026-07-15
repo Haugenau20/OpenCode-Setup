@@ -1,0 +1,15 @@
+{
+  "name": "mcp-mfiles",
+  "version": "1.0.0",
+  "description": "MCP server for internal M-Files access",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "undici": "^6.0.0",
+    "zod": "^3.22.0"
+  }
+}

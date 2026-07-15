@@ -48,10 +48,19 @@ command will do.
 ## Core workflow
 
 1. **Spawn** the process with `pty_spawn`; keep the returned session id.
+   **The `command` must be something that keeps the terminal open** if you
+   intend to send input to it afterwards. A command that runs and exits — e.g.
+   `command=echo hello` — ends the session the moment it finishes, so there is
+   nothing left to write to. Spawn a shell (`command=bash`) or the interactive
+   program itself (`command=python`, `command=psql`), then type your actual
+   commands into it with `pty_write`.
 2. **Read** its output with `pty_read`. Poll again after a moment for
    long-running work — the buffer grows as the process emits more.
 3. **Write** input with `pty_write` when the process is waiting on you (a REPL
-   prompt, a `y/n`, a command to type into a shell).
+   prompt, a `y/n`, a command to type into a shell). **To submit the input you
+   must end it with a newline (`\n`) — that newline is how you "press Enter".**
+   Without the trailing `\n` the text just sits at the prompt unsubmitted. For
+   example, send `ls -la\n`, not `ls -la`.
 4. **List** with `pty_list` to see what's still running and how much output each
    session holds.
 5. **Kill** with `pty_kill` when you're done, so background processes and their

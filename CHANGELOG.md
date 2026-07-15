@@ -27,6 +27,53 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
+## [0.2.0] — 2026-07-15
+
+**Action required:** re-pull image + rebuild squid + edit .env (new MCP credentials)
+
+### Added
+- Read-only **M-Files MCP server** (`opencode/mcp-servers/mfiles/`), vendored
+  into the image and auto-enabled when `MFILES_BASE_URL` + `MFILES_PAT` are
+  present in `.env` (force off with `DISABLE_MFILES_MCP=1`). M-Files is API-only
+  (no git transport), so it follows the Jira/JFrog/Confluence recipe — a
+  two-value `MFILES_{BASE_URL,PAT}` pair — but is the **first server to use a
+  custom `X-Authentication` header** for the PAT (not Authorization/Bearer, not
+  Basic, no username); the server appends `/REST` to the base URL. Tools:
+  `list_object_types`, `list_classes`, `search_objects`, `get_object`,
+  `get_object_properties`, `get_file_content`.
+- **`mfiles-fetch`** skill driving the new tools for document-management (DMS)
+  lookups (discover object types, search, fetch an object with its properties
+  and files, download file content).
+- New `xAuthenticationAuth()` builder in `opencode/mcp-servers/_lib/common.js`.
+- Squid allowlist entry `squid/allowlist.d/60-mfiles.conf` for the M-Files host
+  (HTTPS/443 — non-standard ports go in `squid.conf` `SSL_ports`).
+- **"Getting an M-Files authentication token"** section in `docs/MCP_SERVERS.md`
+  covering how to mint `MFILES_PAT` — unlike the other services, the
+  `X-Authentication` value is a session token you obtain by POSTing vault
+  credentials to `/REST/server/authenticationtokens` (incl. reading the vault
+  GUID from M-Files Desktop Settings, the `Domain`/`Expiration`/`ReadOnly`
+  fields, token-expiry `401`/`403` symptoms, and doing it through the
+  container's Squid proxy). `.env.example` points at it.
+
+### Changed
+- `.env.example` gains an M-Files block and `DISABLE_MFILES_MCP`.
+- `scripts/doctor.sh` `MCP_SERVICES` table adds `mfiles:0`, so the health check
+  verifies the M-Files MCP wiring too.
+- Docs (`docs/MCP_SERVERS.md`, `opencode/bundle/AGENTS.md`) and
+  `opencode/manifest.json` updated to cover six MCP servers.
+- **New top-level `VERSION` file** holds the current release number as the
+  single source of truth. A new **`scripts/release.sh`** reads it and does the
+  whole build → tag → push (opencode + squid images) in one command, passing the
+  version as the `IMAGE_VERSION` build arg so the image tag, OCI label, and
+  `/etc/opencode/manifest.json` can't drift. Push is gated behind `--push` (with
+  a confirmation prompt) and `--latest` moves the floating tag; `MAINTAINERS.md`
+  documents the new flow. (Consumers pin with `IMAGE_TAG` as before — no consumer
+  action.)
+- **`pty-sessions` skill** clarified: `pty_spawn`'s `command` must be something
+  that keeps the terminal open (e.g. `bash`, not `echo hello`, which exits
+  immediately), and driving a session via `pty_write` requires a trailing
+  newline (`\n`) to act as pressing Enter.
+
 ## [0.1.0] — 2026-07-10
 
 **Action required:** re-pull image + recreate the stack (the `NO_PROXY`, Squid
