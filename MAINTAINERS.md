@@ -4,11 +4,14 @@ You maintain this repo; developers consume it. This document is for you.
 
 ## Cutting a release
 
-Releases are version-numbered image tags pushed manually to Artifactory.
-Pick the next version (semver, e.g. `0.0.6`) and use it everywhere below.
+Releases are version-numbered image tags pushed manually to Artifactory. The
+current version lives in the top-level **`VERSION`** file — the single source of
+truth. To cut a release, first bump `VERSION` to the next semver number (e.g.
+`0.2.0`), then the steps below read it back with `$(cat VERSION)`.
 
 ```
-VERSION=0.0.6
+# bump the VERSION file first, then load it here
+VERSION=$(cat VERSION)
 
 # 0. run the local gate — bash -n/shellcheck, JSON validity, node --check on
 #    the MCP servers, and the bats suite under tests/; also runs the
@@ -18,7 +21,8 @@ VERSION=0.0.6
 ./scripts/check.sh
 
 # 1. update CHANGELOG.md: rename [Unreleased] to [$VERSION] with today's
-#    date, fill in the "Action required" line, and commit it.
+#    date, fill in the "Action required" line, and commit it (together with
+#    the VERSION bump).
 # 2. drop the real corp CA into ca/  (it's gitignored)
 # 3. build both images, tagged with the version. --build-arg IMAGE_VERSION on
 #    the opencode build stamps the OCI version label AND gets baked into

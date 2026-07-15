@@ -27,7 +27,7 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
-## [Unreleased]
+## [0.2.0] — 2026-07-15
 
 **Action required:** re-pull image + rebuild squid + edit .env (new MCP credentials)
 
@@ -61,6 +61,15 @@ up. The vocabulary:
   verifies the M-Files MCP wiring too.
 - Docs (`docs/MCP_SERVERS.md`, `opencode/bundle/AGENTS.md`) and
   `opencode/manifest.json` updated to cover six MCP servers.
+- **New top-level `VERSION` file** holds the current release number as the
+  single source of truth; `MAINTAINERS.md`'s release flow now reads
+  `VERSION=$(cat VERSION)` and passes it as the `IMAGE_VERSION` build arg
+  instead of hand-typing the number. (Consumers pin with `IMAGE_TAG` as before —
+  no consumer action.)
+- **`pty-sessions` skill** clarified: `pty_spawn`'s `command` must be something
+  that keeps the terminal open (e.g. `bash`, not `echo hello`, which exits
+  immediately), and driving a session via `pty_write` requires a trailing
+  newline (`\n`) to act as pressing Enter.
 
 ## [0.1.0] — 2026-07-10
 
