@@ -37,16 +37,33 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# env_file_value KEY [FILE] — value of KEY from a dotenv FILE (default ./.env),
+# or empty if the file or key is absent. Ignores comments/blank lines, takes the
+# last assignment, and strips optional surrounding quotes. It does NOT `source`
+# the file (no arbitrary execution) — it just reads the one key.
+env_file_value() {
+  local key="$1" file="${2:-$ROOT/.env}" line
+  [ -f "$file" ] || return 0
+  line="$(grep -E "^[[:space:]]*${key}=" "$file" 2>/dev/null | tail -n1)" || return 0
+  line="${line#*=}"
+  line="${line%\"}"; line="${line#\"}"      # strip surrounding double quotes
+  line="${line%\'}"; line="${line#\'}"      # strip surrounding single quotes
+  printf '%s' "$line"
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
-# FILL IN: your registry / image name. This is the opencode image's full path;
-# the squid image is the same with a `-squid` suffix. Overridable from the
-# environment (e.g. `IMAGE_REGISTRY=... ./scripts/release.sh`).
+# Registry / image name — the opencode image's full path; the squid image is the
+# same with a `-squid` suffix. Resolved in this order (first non-empty wins):
+#   1. the IMAGE_REGISTRY environment variable (e.g. IMAGE_REGISTRY=… ./release.sh)
+#   2. IMAGE_REGISTRY in ./.env  (the same file consumers set — usually all you need)
+#   3. the fallback below (edit it if you'd rather hard-code it here)
 # ─────────────────────────────────────────────────────────────────────────────
+IMAGE_REGISTRY="${IMAGE_REGISTRY:-$(env_file_value IMAGE_REGISTRY)}"
 IMAGE_REGISTRY="${IMAGE_REGISTRY:-artifactory.internal.example/opencode-workplace}"
 
-# Optional: pin the upstream OpenCode CLI version for the build. Empty ⇒ use the
-# Dockerfile's own default.
-OPENCODE_VERSION="${OPENCODE_VERSION:-}"
+# Optional: pin the upstream OpenCode CLI version for the build. Resolved the
+# same way (env var, then ./.env); empty ⇒ use the Dockerfile's own default.
+OPENCODE_VERSION="${OPENCODE_VERSION:-$(env_file_value OPENCODE_VERSION)}"
 
 # ── arg parsing ──────────────────────────────────────────────────────────────
 DO_PUSH=0 DO_LATEST=0 DRY_RUN=0 ASSUME_YES=0 BUILD_OPENCODE=1 BUILD_SQUID=1
