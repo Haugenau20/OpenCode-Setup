@@ -1,6 +1,6 @@
 ---
 name: confluence-fetch
-description: "Fetches documentation and wiki context from the internal Confluence instance using the Confluence MCP tools — reading pages by id or space+title, CQL search, browsing a space's page tree, and listing spaces. Use whenever the user wants to look up, find, read, search, or cross-reference Confluence pages, runbooks, design docs, onboarding guides, or any wiki content — even if they don't say 'Confluence' explicitly. Trigger phrases include 'find the runbook for X', 'what does the wiki say about Y', 'read the onboarding page', 'search confluence for Z', 'what spaces do we have', 'find the design doc for service A', 'is there documentation on B'. Read-only."
+description: "Fetches documentation and wiki context from the internal Confluence instance using the Confluence MCP tools — reading pages by id or space+title, CQL search, browsing a space's page tree, and listing spaces. Use whenever the user wants to look up, find, read, search, or cross-reference Confluence pages, runbooks, design docs, onboarding guides, or any wiki content — even if they don't say 'Confluence' explicitly. Trigger phrases include 'find the runbook for X', 'what does the wiki say about Y', 'read the onboarding page', 'search confluence for Z', 'what spaces do we have', 'find the design doc for service A', 'is there documentation on B'. Read-only — for creating or editing pages use the confluence-write skill instead."
 ---
 
 # Confluence MCP — Agent Skill
@@ -69,6 +69,9 @@ CQL is the powerful path — filter by `space`, `type`, `title ~ "..."`,
   `spaceKey` and `title` (exact match). Body is rendered from Confluence storage
   format to plain text — a simplified rendering; macro-heavy pages may read
   better in the browser (a link is always included).
+- `format="storage"` returns the raw storage-format XHTML instead. Only needed
+  when you are about to *edit* the page (see the `confluence-write` skill) — the
+  default text rendering is lossy and cannot be written back.
 
 ### `confluence_search`
 - CQL (Confluence Query Language) search — the main discovery tool. Returns
@@ -115,4 +118,8 @@ CQL is the powerful path — filter by `space`, `type`, `title ~ "..."`,
 - Page bodies are a **simplified text rendering** of Confluence storage format —
   good for reading and quoting, but tables/macros may lose structure. The page
   link is always included for the full fidelity view.
-- This MCP is **read-only** — it never creates, edits, or deletes pages.
+- The tools in **this** skill are read-only — they never change anything. Writing
+  is a separate, opt-in capability: the Confluence MCP grows `create_page`,
+  `update_page`, `append_to_page` and `add_comment` only when
+  `ALLOW_CONFLUENCE_WRITE=1` is set in `.env`, and the **`confluence-write`**
+  skill covers them. Deleting pages is never possible from either skill.
