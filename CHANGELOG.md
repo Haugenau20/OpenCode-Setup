@@ -29,8 +29,8 @@ up. The vocabulary:
 
 ## [Unreleased]
 
-**Action required:** edit .env (two new optional keys) — no image change unless
-you opt into Symphony
+**Action required:** edit .env (new optional keys) — no image change unless you
+opt into Symphony
 
 ### Added
 - **Symphony: opt-in unattended orchestration from a folder queue.** A separate
@@ -67,10 +67,39 @@ you opt into Symphony
 
   This is **defence in depth, not a security boundary** — an agent with a bash
   tool can call `/usr/bin/git` directly, past the PATH shim. It turns a mistake
-  into a legible local error. The boundary is the credential: a GitLab **group
-  access token** scoped to a sandbox group, enforced server-side. `docs/SYMPHONY.md`
-  says this at length and it is the part to read before running anything
-  unattended.
+  into a legible local error. The boundary is the credential: a GitLab **project
+  access token** (or a group one, if symphony must span repos), enforced
+  server-side. `docs/SYMPHONY.md` says this at length and it is the part to read
+  before running anything unattended.
+
+- **GitLab Issues as a second symphony tracker.** `tracker.kind: gitlab` in
+  `WORKFLOW.md` runs work items as GitLab issues instead of files, with state
+  held in a `symphony::<state>` label. Both trackers ship; the file queue stays
+  the zero-setup option (no token, no network) and remains what the test suite
+  exercises. New `symphony/WORKFLOW.gitlab.md.example`.
+
+  Every transition rewrites the **whole** label set in one request rather than
+  add-then-remove, so there is no window where an issue wears two states — and
+  no dependence on scoped labels, which are Premium. Behaviour is identical on
+  Free. Blocking issue links are Premium too, so blockers degrade to "none"
+  there rather than erroring.
+
+  What it costs: the file queue's claim is a `rename(2)` and cannot double-
+  claim; the Issues API has no compare-and-swap, so two orchestrators against
+  one project can both dispatch an issue. One orchestrator — the supported
+  deployment — is unaffected.
+
+- **Two tokens for the GitLab tracker** (`SYMPHONY_GITLAB_TOKEN` +
+  `SYMPHONY_HTTP_PROXY`). Symphony gets a **project** access token with the
+  **Reporter** role: it reads and writes issues on one project and cannot push
+  code. The agent keeps a separate Developer token for the repository. Neither
+  can do the other's job, so a compromised orchestrator can vandalize issue text
+  and nothing else. Note `api` is full API access for that project — there is no
+  issues-only scope, and it is the *role* that constrains it.
+
+  This does cost symphony its "no credentials, no egress" posture, but only on
+  the GitLab tracker: it joins `oc_proxy` and reaches GitLab through squid,
+  which was already allowlisted. On `file_queue` it still holds nothing.
 
 ## [0.2.0] — 2026-07-15
 

@@ -30,11 +30,22 @@ services:
       SYMPHONY_WORKFLOW: /config/WORKFLOW.md
       SYMPHONY_OPENCODE_URL: http://opencode:4096
       SYMPHONY_LOG_LEVEL: ${SYMPHONY_LOG_LEVEL:-info}
-      # Deliberately NO proxy vars and NO service credentials. This container
-      # sits on oc_internal only (see `networks:` below), so it has no route
-      # off the host network in the first place — it talks to opencode and it
-      # moves files. Every credential-bearing operation happens in the opencode
-      # container, behind git-guard and squid.
+      # Only set for tracker.kind: gitlab. Leave blank for the file queue and
+      # this container keeps its stronger posture: no credentials at all.
+      #
+      # This MUST be a PROJECT access token with the REPORTER role — it can
+      # read and write issues on one project and cannot push code. The agent's
+      # Developer token lives in the opencode container and never comes here.
+      # Neither can do the other's job. docs/SYMPHONY.md §two tokens.
+      SYMPHONY_GITLAB_TOKEN: ${SYMPHONY_GITLAB_TOKEN:-}
+      # Egress for the GitLab tracker only. With tracker.kind: file_queue these
+      # are unused and the container has no route off-host at all.
+      HTTP_PROXY: ${SYMPHONY_HTTP_PROXY:-}
+      HTTPS_PROXY: ${SYMPHONY_HTTP_PROXY:-}
+      http_proxy: ${SYMPHONY_HTTP_PROXY:-}
+      https_proxy: ${SYMPHONY_HTTP_PROXY:-}
+      NO_PROXY: "localhost,127.0.0.1,::1,opencode,squid"
+      no_proxy: "localhost,127.0.0.1,::1,opencode,squid"
     volumes:
       # The queue. Bind-mounted from the host so `ls`, `mv` and your editor are
       # the management UI. All six state directories live under this one root:
@@ -49,7 +60,12 @@ services:
       # input (it drives hooks), and the agent must never be able to edit it.
       - ${SYMPHONY_CONFIG_PATH:-./symphony}:/config:ro,z
     networks:
+      # oc_internal reaches opencode. oc_proxy is only useful once
+      # SYMPHONY_HTTP_PROXY points at squid, which you set for the gitlab
+      # tracker; on the file queue symphony has no egress regardless, because
+      # both networks are internal: true and squid is the only way out.
       - oc_internal
+      - oc_proxy
     restart: unless-stopped
 
   # The agent's workspaces have to be visible to the container that actually

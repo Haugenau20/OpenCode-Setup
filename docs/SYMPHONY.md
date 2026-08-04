@@ -15,6 +15,34 @@ safety section before the first run.
   [`openai/symphony`](https://github.com/openai/symphony), with the tracker
   replaced by a directory tree and Codex replaced by OpenCode.
 
+## Two trackers: pick one
+
+`tracker.kind` in `WORKFLOW.md` chooses where work items live.
+
+| | `file_queue` | `gitlab` |
+|---|---|---|
+| Work item | a markdown file | a GitLab issue |
+| State | the directory it sits in | a `symphony::<state>` label |
+| Review surface | `ls symphony-queue/review/` | the issue page + its linked MR |
+| Symphony needs | nothing — no token, no egress | a project token + squid |
+| Atomic claim | yes, `rename(2)` is the lock | no (see below) |
+| Setup | create a directory | create a project + labels |
+
+**Start with `file_queue`.** It needs no GitLab project, no token and no
+network, which makes stage 0 free — and stage 0 is where you find out whether
+your model can hold an unattended loop at all.
+
+**Move to `gitlab` for real work.** The review gate becomes a URL you can open
+from a phone instead of an `ls` on one particular machine, merge requests link
+themselves to issues, and the whole thing is visible to anyone with project
+access.
+
+One thing you give up: the file queue's claim is a `rename(2)`, which either
+moves the file or fails, so two orchestrators cannot both claim an item. The
+GitLab Issues API has no compare-and-swap, so that guarantee does not carry
+over. With a single orchestrator — the intended deployment — it makes no
+difference. With two polling one project, both can dispatch the same issue.
+
 ## The queue is the interface
 
 ```
@@ -75,18 +103,20 @@ of these is load-bearing.
 whole GitLab identity: every group, every production repo you can reach. Nothing
 in this container can claw that back, because the token *is* the authority.
 
-Instead:
+Instead, prefer the narrowest thing that does the job:
 
-1. Create a `symphony-sandbox` group in GitLab with throwaway repos in it.
-2. Mint a **Group Access Token** on that group — role **Developer**, scopes
-   `api` + `write_repository`.
-3. Put that token in the symphony stack's `.env` as `GITLAB_PAT`.
+1. **A project access token**, if symphony works one project — which is the
+   normal case, since a GitLab project holds exactly one repository. Role
+   **Developer**, scopes `api` + `write_repository`. This is the tightest
+   option: one project, one repo, one issue tracker.
+2. **A group access token** over a `symphony-sandbox` group, only once you want
+   several repos under one credential. Same role and scopes.
 
-Every other project now returns 404. Not "denied" — invisible. A confused agent,
-a hallucinated remote, a prompt injection out of an issue comment: all of them
-hit a server-side authorization check that does not read English.
+Either way every other project returns 404. Not "denied" — invisible. A confused
+agent, a hallucinated remote, a prompt injection out of an issue comment: all of
+them hit a server-side authorization check that does not read English.
 
-While you are in the group settings, all free and server-side:
+Then, all free and server-side, in the project or group settings:
 
 - Protect `main`: **No one** may push; merge only via MR.
 - Require at least one approval — the agent opens, a human merges.
@@ -101,18 +131,47 @@ symphony stack gets its own `.env` with **only** the sandbox GitLab token — no
 `MFILES_PAT`. Those servers are then never wired into `opencode.json` at all.
 Not disabled: absent.
 
-### 3. Symphony itself holds nothing
+### 3. Two tokens, neither able to do the other's job
 
-The symphony container sits on `oc_internal` only. It has no egress, no
-credentials, and no git remote. It talks to the opencode server over HTTP and
-moves files. Every credential-bearing operation happens in the opencode
-container, where git-guard, squid and the credential helper already apply.
+This applies to `tracker.kind: gitlab`, and it is the reason a GitLab project is
+a *better* containment story than the folder queue rather than a worse one.
 
-Keep it that way: leave the `after_create` hook empty and let the agent clone as
-its first step. Putting a clone in the hook is what would force a token and
-egress into this container.
+| | Token | Role | Scope | Can push code? |
+|---|---|---|---|---|
+| **symphony** (`SYMPHONY_GITLAB_TOKEN`) | project access token | **Reporter** | `api` | **No** |
+| **the agent** (`GITLAB_PAT`) | project access token | **Developer** | `api` + `write_repository` | Yes — that project only |
 
-### 4. `GIT_REMOTE_ALLOWLIST` — defence in depth, not a boundary
+Symphony reads and writes issues. The agent pushes branches and opens MRs.
+Neither can do the other's job, so a compromised orchestrator can vandalize
+issue text and nothing else, and a prompt-injected agent cannot rewrite its own
+work queue.
+
+Be precise about what constrains what: **`api` is full API access for that
+project** — there is no issues-only scope. It is the **Reporter role** that
+stops symphony pushing code. Effective permission is scope × role, so get the
+role right.
+
+Both are *project* access tokens, so both are limited to one project. GitLab's
+docs are explicit: a project access token *"can access only its project, and you
+cannot use project access tokens to access resources in other projects, or to
+create other group, project, or personal access tokens."*
+
+### 4. Symphony holds nothing (file queue) or one weak token (gitlab)
+
+On `file_queue`, symphony has no egress, no credentials and no git remote at
+all. It talks to the opencode server and moves files.
+
+On `gitlab` it needs to reach the API, so it gets the Reporter token above and
+`SYMPHONY_HTTP_PROXY=http://squid:3128`. Both its networks are `internal: true`,
+so squid remains the only way out and the existing
+`squid/allowlist.d/30-gitlab.conf` entry is all it can reach. That is a real
+reduction from "holds nothing", and the Reporter role is the compensation.
+
+Either way, keep the `after_create` hook empty and let the agent clone as its
+first step. A clone in the hook would force a *repository* credential into this
+container, which is the line worth holding.
+
+### 5. `GIT_REMOTE_ALLOWLIST` — defence in depth, not a boundary
 
 `ALLOW_REMOTE_GIT=1` is required for symphony, and it is binary: once on, every
 remote is reachable. `GIT_REMOTE_ALLOWLIST` narrows the destination:
@@ -133,13 +192,16 @@ the remote is read from the repo the command will actually act on.
 stale branch config, a pasted URL, a hallucinated remote — into a legible local
 error instead of a confusing 403. Do not let it substitute for §1.
 
-### 5. Queue files are untrusted input
+### 6. Tracker content is untrusted input
 
 The agent writes its workpad into the same file the orchestrator parses, so
 front matter is agent-influenced by construction. The tracker validates every
 field, refuses ids that are not `^[A-Za-z0-9][A-Za-z0-9._-]*$`, resolves every
 path through a containment check, and never interpolates a front-matter value
 into a shell command or a git URL.
+
+The same holds on GitLab, more so: an issue description or comment is writable
+by the agent *and* by anyone with project access. Treat both as hostile input.
 
 The corollary for you: **`WORKFLOW.md` is trusted config and is mounted
 read-only.** It drives the hooks. Never template a hook from item content.
@@ -167,15 +229,22 @@ OPENCODE_PORT=4097
 LLM_API_BASE=https://llm.internal.example/v1
 LLM_API_KEY=<yours>
 
-# The sandbox group access token — NOT your personal PAT.
+# The AGENT's token: project (or group) access token, Developer role.
+# NOT your personal PAT.
 GITLAB_BASE_URL=https://gitlab.internal.example
 GITLAB_USER=<you>
-GITLAB_PAT=<group access token, Developer, api+write_repository>
+GITLAB_PAT=<project access token, Developer, api+write_repository>
+
+# Only for tracker.kind: gitlab — SYMPHONY's token. Reporter role: it can
+# read/write issues on this one project and cannot push code. A separate
+# token from GITLAB_PAT above, deliberately.
+SYMPHONY_GITLAB_TOKEN=<project access token, Reporter, api>
+SYMPHONY_HTTP_PROXY=http://squid:3128
 
 # Leave every other *_PAT blank.
 
 ALLOW_REMOTE_GIT=1
-GIT_REMOTE_ALLOWLIST=gitlab.internal.example/symphony-sandbox/
+GIT_REMOTE_ALLOWLIST=gitlab.internal.example/my-group/my-project
 
 SYMPHONY_REF=v0.1.0
 SYMPHONY_QUEUE_PATH=./symphony-queue
@@ -192,9 +261,21 @@ the rest — reducing the surface before credentials even come into it.
 ### 4. Workflow
 
 ```
-cp symphony/WORKFLOW.md.example symphony/WORKFLOW.md
+cp symphony/WORKFLOW.md.example symphony/WORKFLOW.md          # file queue
+cp symphony/WORKFLOW.gitlab.md.example symphony/WORKFLOW.md   # GitLab issues
 $EDITOR symphony/WORKFLOW.md
 ```
+
+For the GitLab tracker, create the state labels on the project first —
+`symphony::todo`, `symphony::in-progress`, `symphony::review`,
+`symphony::done`, `symphony::failed`, `symphony::cancelled`. On Premium they
+are scoped labels and mutually exclusive in the UI; on Free they are ordinary
+labels and symphony enforces exclusivity itself by rewriting the whole label
+set on every transition. Nothing behaves differently.
+
+An issue with no `symphony::` label is not symphony's and is ignored. That is
+how you keep an ordinary backlog in the same project: work only becomes
+symphony's when you label it `symphony::todo`.
 
 Front matter is config, the body is the agent's prompt template (Liquid). Start
 with `max_concurrent_agents: 1` and `max_turns: 3`.
@@ -276,6 +357,12 @@ To ship a change: cut a tag in `symphony-queue`, bump `SYMPHONY_REF`, rebuild.
 - **Recovery re-runs side effects.** An item recovered from `in-progress/` is
   re-dispatched from the start. The workpad is what lets the agent pick up its
   own thread; a session-resume path is future work.
-- **No cross-machine coordination.** The queue is a directory on one host. Two
-  machines sharing it over a network filesystem would break the `rename(2)`
-  atomicity argument.
+- **No cross-machine coordination.** On `file_queue` the queue is a directory on
+  one host, and sharing it over a network filesystem would break the `rename(2)`
+  atomicity argument. On `gitlab` there is no atomic claim at all, so two
+  orchestrators against one project can double-dispatch. One orchestrator is the
+  supported deployment either way.
+- **No agent-authored workpad on GitLab yet.** The GitLab MCP in this image is
+  read-only, so the agent cannot update an issue comment as it works. The issue
+  description is the brief and the linked MR is the review surface; a live
+  workpad comment needs a write-capable tool and is future work.
