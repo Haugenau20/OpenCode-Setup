@@ -101,6 +101,42 @@ opt into Symphony
   the GitLab tracker: it joins `oc_proxy` and reaches GitLab through squid,
   which was already allowlisted. On `file_queue` it still holds nothing.
 
+- **GitLab MCP: issues, pipelines, and an opt-in write surface.** New read
+  tools `list_issues`, `get_issue`, `get_issue_notes` and `get_pipelines` — the
+  server previously had no issue support at all, which the GitLab tracker needs.
+
+  New write tools, **off by default** behind `GITLAB_ALLOW_WRITE=1`:
+  `create_merge_request`, `update_merge_request`, `create_mr_note`,
+  `create_issue`, `create_issue_note`, `update_issue_note`. Optionally narrowed
+  to specific projects with `GITLAB_WRITE_PROJECTS` (whitespace/comma-separated,
+  prefix-matched on a path-segment boundary — the same rule
+  `GIT_REMOTE_ALLOWLIST` uses). Gated twice: the tools are not listed when the
+  switch is off, **and** every write handler re-checks, because a client can
+  call a tool it was never offered.
+
+  Deliberately absent even at `=1`: anything that sets issue labels, closes or
+  reopens an issue, or merges an MR. In the symphony workflow the `symphony::`
+  label *is* the workflow state and the orchestrator owns every transition — an
+  agent able to relabel its own issue could mark its work reviewed or feed
+  itself work forever. `create_issue` refuses labels in that namespace
+  (`GITLAB_QUEUE_LABEL_PREFIX`, default `symphony`), so a follow-up arrives
+  unlabelled and a human admits it to the queue.
+
+  Gating logic lives in a new dependency-free `opencode/mcp-servers/_lib/write_gate.js`
+  so it is unit-testable without any server's `node_modules`, and is
+  service-agnostic for whenever a second server needs it. 24 unit tests plus 5
+  structural tests that fail if a future write tool skips the gate.
+
+  This closes the "no agent-authored workpad on GitLab" limitation noted when
+  the tracker landed: the agent can now keep one running comment on its issue
+  via `get_issue_notes` + `update_issue_note`.
+
+### Changed
+- `opencode/manifest.json` gains `GITLAB_ALLOW_WRITE`, `GITLAB_WRITE_PROJECTS`,
+  `GITLAB_QUEUE_LABEL_PREFIX` and the previously-missed `GIT_REMOTE_ALLOWLIST`.
+- The `gitlab-fetch` skill documents the issue tools, the write surface, the
+  one-comment workpad pattern, and what is deliberately impossible.
+
 ## [0.2.0] — 2026-07-15
 
 **Action required:** re-pull image + rebuild squid + edit .env (new MCP credentials)

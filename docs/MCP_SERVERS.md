@@ -268,7 +268,10 @@ verification.
   workflow — most commonly tracing a Jira issue to the merge requests and
   commits that implemented it (`get_commits` filtered by ticket key, then
   `get_merge_requests` / `get_merge_request` / `get_mr_diff`), but also plain
-  "what changed in this MR" or "read this file from GitLab" requests.
+  "what changed in this MR" or "read this file from GitLab" requests. It also
+  covers issues (`list_issues`, `get_issue`, `get_issue_notes`) and CI status
+  (`get_pipelines`), and — only when writes are enabled, see below — opening
+  merge requests and posting comments during unattended symphony runs.
 - The **`/sync-jira`** command resolves the issue key from the current branch (or
   an argument) and pulls the ticket into context via `get_issue`.
 - The **`jfrog-fetch`** skill drives the JFrog tools for artifact/dependency
@@ -290,6 +293,52 @@ verification.
   downloading an attached file (`get_file_content`).
 
 All six degrade gracefully when their MCP is disabled.
+
+## Writes: off by default, GitLab only
+
+Every server here is read-only by construction, which is a real safety property
+— a confused or prompt-injected agent cannot change anything in Bitbucket, Jira,
+JFrog, Confluence or M-Files. The GitLab server is the one exception, and only
+when you ask for it:
+
+```
+GITLAB_ALLOW_WRITE=1
+GITLAB_WRITE_PROJECTS=mygroup/my-sandbox-project
+```
+
+This exists for unattended [symphony](SYMPHONY.md) runs, where the agent has to
+open merge requests and answer review comments with nobody at the keyboard. For
+ordinary interactive use leave it `0` — you are at the keyboard.
+
+With the switch on, the server additionally offers `create_merge_request`,
+`update_merge_request`, `create_mr_note`, `create_issue`, `create_issue_note`
+and `update_issue_note`. `GITLAB_WRITE_PROJECTS` narrows those to specific
+projects, whitespace- or comma-separated, prefix-matched on a path-segment
+boundary — so `mygroup` admits `mygroup/service` but not `mygroup-evil/service`.
+Empty means any project the token can reach. Same rule as
+`GIT_REMOTE_ALLOWLIST`, deliberately, so there is one thing to learn.
+
+Two gates, not one: with the switch off the write tools are **not listed** to
+the model at all, *and* every write handler re-checks before acting. Listing is
+not enforcement — a client can call a tool it was never offered.
+
+**What stays impossible even at `=1`:** setting an issue's labels, closing or
+reopening an issue, and merging an MR. In the symphony workflow an issue's
+`symphony::` label *is* its workflow state and the orchestrator owns every
+transition; an agent able to relabel its own issue could mark its work reviewed,
+or file itself unbounded new work. `create_issue` refuses labels in that reserved
+namespace (`GITLAB_QUEUE_LABEL_PREFIX`, default `symphony`), so a follow-up the
+agent files arrives unlabelled and a human decides whether it enters the queue.
+
+As with `GIT_REMOTE_ALLOWLIST`, this is defence in depth rather than a boundary:
+the agent has a shell and a token and can call the REST API directly. What it
+buys is that write capability is off unless someone deliberately enabled it, and
+that the tools offered match what the deployment intends. The boundary is the
+token — its project scope and its role.
+
+The gating logic lives in `opencode/mcp-servers/_lib/write_gate.js`, which is
+dependency-free (so it is unit-testable without any server's `node_modules`) and
+service-agnostic, ready for whenever a second server needs the same treatment.
 
 ## Adding another service later
 

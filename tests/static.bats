@@ -201,3 +201,57 @@ shell_files() {
     return 1
   }
 }
+
+# --- GitLab MCP write surface ------------------------------------------------
+#
+# The gate is only as good as its weakest tool. These are structural checks
+# against the source, so tool #7 cannot quietly skip a step that tools 1-6 all
+# take — which is exactly the kind of omission nobody notices in review.
+
+@test "gitlab MCP: every write tool has a dispatch case" {
+  src="$REPO_ROOT/opencode/mcp-servers/gitlab/index.js"
+  names="$(sed -n '/^const WRITE_TOOLS = \[/,/^\];/p' "$src" | grep -o 'name: "[a-z_]*"' | cut -d'"' -f2)"
+  [ -n "$names" ]
+  missing=""
+  for n in $names; do
+    grep -q "case \"$n\":" "$src" || missing="${missing}${n} "
+  done
+  [ -z "$missing" ] || { echo "write tools with no dispatch case: $missing" >&2; false; }
+}
+
+@test "gitlab MCP: every write handler calls assertWriteAllowed" {
+  src="$REPO_ROOT/opencode/mcp-servers/gitlab/index.js"
+  names="$(sed -n '/^const WRITE_TOOLS = \[/,/^\];/p' "$src" | grep -o 'name: "[a-z_]*"' | cut -d'"' -f2)"
+  missing=""
+  for n in $names; do
+    # snake_case tool name -> camelCase handler, then read that function body.
+    fn="$(echo "$n" | awk -F_ '{printf "%s", $1; for(i=2;i<=NF;i++) printf "%s%s", toupper(substr($i,1,1)), substr($i,2)}')"
+    body="$(sed -n "/^async function ${fn}(/,/^}/p" "$src")"
+    [ -n "$body" ] || { missing="${missing}${n}(no handler) "; continue; }
+    echo "$body" | grep -q "assertWriteAllowed" || missing="${missing}${n} "
+  done
+  [ -z "$missing" ] || { echo "write handlers missing assertWriteAllowed: $missing" >&2; false; }
+}
+
+@test "gitlab MCP: the advertised tool list is gated on the write switch" {
+  src="$REPO_ROOT/opencode/mcp-servers/gitlab/index.js"
+  grep -q 'const TOOLS = WRITES_ENABLED ? \[...READ_TOOLS, ...WRITE_TOOLS\] : READ_TOOLS' "$src"
+}
+
+@test "gitlab MCP: the dispatcher refuses write tools independently of the listing" {
+  # Hiding a tool from tools/list is not enforcement — a client can call a name
+  # it was never offered. The switch must be re-checked on the call path.
+  src="$REPO_ROOT/opencode/mcp-servers/gitlab/index.js"
+  handler="$(sed -n '/setRequestHandler(CallToolRequestSchema/,/^});/p' "$src")"
+  echo "$handler" | grep -q 'WRITE_TOOL_NAMES.has(name) && !WRITES_ENABLED'
+}
+
+@test "gitlab MCP: no write tool mutates issue labels or state" {
+  # In the symphony workflow the label IS the workflow state and the
+  # orchestrator owns every transition. An agent able to relabel its own issue
+  # could mark its work reviewed, or feed itself work forever. Merging is a
+  # human decision. Neither capability may appear here.
+  src="$REPO_ROOT/opencode/mcp-servers/gitlab/index.js"
+  ! grep -qE 'state_event|"PUT", `/projects/\$\{encodeProjectId\(project\)\}/issues/\$\{issueIid\}`' "$src"
+  ! grep -q '/merge_requests/${mrIid}/merge' "$src"
+}

@@ -192,7 +192,39 @@ the remote is read from the repo the command will actually act on.
 stale branch config, a pasted URL, a hallucinated remote — into a legible local
 error instead of a confusing 403. Do not let it substitute for §1.
 
-### 6. Tracker content is untrusted input
+### 6. `GITLAB_ALLOW_WRITE` — the MCP write surface
+
+The GitLab MCP is read-only until you say otherwise. Unattended runs need more
+than that: the agent has to open merge requests and answer review comments with
+nobody at the keyboard. So:
+
+```
+GITLAB_ALLOW_WRITE=1
+GITLAB_WRITE_PROJECTS=mygroup/my-sandbox-project
+```
+
+With the switch off the write tools are not offered to the model at all. With it
+on, it gains: `create_merge_request`, `update_merge_request`, `create_mr_note`,
+`create_issue`, `create_issue_note`, `update_issue_note`. `GITLAB_WRITE_PROJECTS`
+narrows that to specific projects, prefix-matched on a path-segment boundary —
+the same rule `GIT_REMOTE_ALLOWLIST` uses, so there is one thing to learn.
+
+Gated twice, because hiding a tool from `tools/list` is not enforcement: the
+tools are not listed, **and** every write handler re-checks before acting.
+
+**What stays impossible even at `=1`:** there is no tool to set an issue's
+labels, close or reopen an issue, or merge an MR. In this workflow the
+`symphony::` label *is* the state and the orchestrator owns every transition. An
+agent that could relabel its own issue could mark its own work reviewed, or file
+itself new `symphony::todo` work forever. `create_issue` refuses labels in that
+namespace outright, so a follow-up the agent files arrives unlabelled and a
+human decides whether it joins the queue.
+
+Same caveat as always: defence in depth, not a boundary. The agent has a shell
+and a token and can `curl` the API. The boundary is §1 and §3 — the token's
+project scope and its role.
+
+### 7. Tracker content is untrusted input
 
 The agent writes its workpad into the same file the orchestrator parses, so
 front matter is agent-influenced by construction. The tracker validates every
@@ -354,15 +386,10 @@ To ship a change: cut a tag in `symphony-queue`, bump `SYMPHONY_REF`, rebuild.
 - **Bitbucket/GitLab MCPs are read-only.** The agent can read MR comments but
   cannot reply or merge, so `review/ → done/` is human-driven by construction.
   That is the intended shape for now, not a gap to close.
-- **Recovery re-runs side effects.** An item recovered from `in-progress/` is
-  re-dispatched from the start. The workpad is what lets the agent pick up its
-  own thread; a session-resume path is future work.
 - **No cross-machine coordination.** On `file_queue` the queue is a directory on
   one host, and sharing it over a network filesystem would break the `rename(2)`
   atomicity argument. On `gitlab` there is no atomic claim at all, so two
   orchestrators against one project can double-dispatch. One orchestrator is the
   supported deployment either way.
-- **No agent-authored workpad on GitLab yet.** The GitLab MCP in this image is
-  read-only, so the agent cannot update an issue comment as it works. The issue
-  description is the brief and the linked MR is the review surface; a live
-  workpad comment needs a write-capable tool and is future work.
+- **Recovery re-runs side effects.** An item recovered from `in-progress/` is
+  re-dispatched from the start rather than resuming its OpenCode session.

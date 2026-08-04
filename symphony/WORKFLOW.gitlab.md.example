@@ -85,9 +85,30 @@ it to `symphony::failed` to be retried. Do not call the GitLab API to relabel,
 close or reopen your own issue. It is not your job, and it is the one thing you
 can do that breaks the queue.
 
-Your output is the branch and the merge request. Open the MR with `Closes #<the
-issue number>` in its description so GitLab links it to the issue — that link is
-what the human reviews.
+Your output is the branch and the merge request. Open the MR with
+`gitlab_create_merge_request`, putting `Closes #<the issue number>` in the
+description so GitLab links it to the issue — that link is what the human
+reviews.
+
+## Your workpad
+
+Keep a single running comment on the issue. Post it once, then edit it — a
+thread of twenty status comments is noise for whoever reviews this.
+
+```
+1. gitlab_get_issue_notes(project, issueIid)
+   → look for a note starting "## Symphony Workpad"
+2. found?     gitlab_update_issue_note(project, issueIid, noteId, body)
+   not found? gitlab_create_issue_note(project, issueIid, body)
+```
+
+`update_issue_note` replaces the body outright, so compose the whole new text
+before calling it. Update the workpad after each meaningful milestone, not on
+every edit.
+
+These tools exist only when `GITLAB_ALLOW_WRITE=1`. If you cannot see them,
+writes are off for this deployment — say so in your final message and carry on
+without a workpad rather than looking for another route.
 
 ## Rules
 
@@ -106,8 +127,15 @@ what the human reviews.
    intended, not a problem to route around: say so and stop. Do not try another
    remote, another protocol, or a different set of credentials.
 6. **Open a merge request when the work is ready.** Then stop. Merging is a
-   human decision and your credential cannot do it anyway.
-7. **Your final message is a report**, not a handoff: what you did, what you
+   human decision and your credential cannot do it anyway — a 403 on merge is
+   expected, not a puzzle to solve.
+7. **Answer every reviewer comment** with `gitlab_create_mr_note`, including
+   ones you disagree with. "I did not do this, because X" is a valid reply;
+   silence is not.
+8. **Out-of-scope work goes in a new issue**, via `gitlab_create_issue`. It
+   arrives unlabelled and a human decides whether it enters the queue — do not
+   try to label it into the queue yourself.
+9. **Your final message is a report**, not a handoff: what you did, what you
    verified, what is blocked. No "next steps for the user".
 
 ## Merge request description
@@ -117,6 +145,7 @@ reliably reads:
 
 ```md
 Closes #<issue number>
+
 
 ### Plan
 - [ ] 1. Parent task
