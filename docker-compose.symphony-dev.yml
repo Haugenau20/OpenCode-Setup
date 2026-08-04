@@ -1,0 +1,26 @@
+name: opencode-${PROJECT_SLUG:-default}
+
+# Overlay on the overlay: develop symphony-queue itself.
+#
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.symphony.yml \
+#                  -f docker-compose.symphony-dev.yml up -d
+#
+# Replaces the baked-in build with a host checkout, so an edit + restart is the
+# whole loop — no image rebuild, no ref bump, no push. Same trick
+# docker-compose.user-layer.yml plays on the config volume.
+#
+# The pinned image is what you run; this is what you iterate with. Do not leave
+# it on: a bind mount means "whatever is in that directory right now", which is
+# the opposite of the reproducibility the SYMPHONY_REF pin buys you.
+
+services:
+  symphony:
+    volumes:
+      # A built checkout of Haugenau20/symphony-queue: run `npm ci && npm run
+      # build` on the host first, and after every change. Only dist/ and
+      # node_modules/ are read here — the container does not compile.
+      - ${SYMPHONY_SRC_PATH:?SYMPHONY_SRC_PATH must be set when using docker-compose.symphony-dev.yml}/dist:/app/dist:ro,z
+      - ${SYMPHONY_SRC_PATH}/node_modules:/app/node_modules:ro,z
+    environment:
+      SYMPHONY_LOG_LEVEL: ${SYMPHONY_LOG_LEVEL:-debug}

@@ -27,6 +27,51 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
+## [Unreleased]
+
+**Action required:** edit .env (two new optional keys) — no image change unless
+you opt into Symphony
+
+### Added
+- **Symphony: opt-in unattended orchestration from a folder queue.** A separate
+  image and compose overlay (`docker-compose.symphony.yml`) that watches a
+  `symphony-queue/` directory tree and runs an OpenCode agent per work item
+  until it is ready for a human. The tracker is the filesystem: the directory an
+  item's markdown file sits in *is* its state (`todo/`, `in-progress/`,
+  `review/`, `done/`, `failed/`, `cancelled/`), and claiming is a `rename(2)`,
+  so the move is the lock. `ls` is the dashboard; there is no UI and no
+  database. The orchestrator itself is
+  [`Haugenau20/symphony-queue`](https://github.com/Haugenau20/symphony-queue),
+  vendored at a pinned `SYMPHONY_REF` exactly the way the opt-in plugins are.
+
+  The symphony container sits on `oc_internal` only: **no egress, no
+  credentials, no git remote of its own.** It talks to the opencode server and
+  moves files; every credential-bearing operation happens in the opencode
+  container, where git-guard, squid and the credential helper already apply.
+
+  Nothing in the base stack changes while the overlay is absent. New files:
+  `symphony/Dockerfile`, `symphony/entrypoint.sh`,
+  `symphony/WORKFLOW.md.example`, `docker-compose.symphony.yml`,
+  `docker-compose.symphony-dev.yml`, `docs/SYMPHONY.md`.
+
+- **`GIT_REMOTE_ALLOWLIST`: a destination gate for remote git.** `ALLOW_REMOTE_GIT`
+  is binary — once it is 1, every remote is reachable, which is fine for a human
+  and wrong for an unattended agent. The new variable narrows *where* remote git
+  may go: whitespace- or comma-separated `host/path` prefixes, matched on a
+  path-segment boundary (so `…/sandbox` is not satisfied by `…/sandbox-evil`).
+  It resolves named remotes through `git remote get-url`, normalizes scp-style
+  `git@host:path`, ignores ports and userinfo, and honours `-C` / `--git-dir`
+  so the remote is read from the repo the command will actually act on. Empty or
+  unset means no restriction, so existing setups are untouched. 21 new bats
+  cases in `tests/git-guard.bats`.
+
+  This is **defence in depth, not a security boundary** — an agent with a bash
+  tool can call `/usr/bin/git` directly, past the PATH shim. It turns a mistake
+  into a legible local error. The boundary is the credential: a GitLab **group
+  access token** scoped to a sandbox group, enforced server-side. `docs/SYMPHONY.md`
+  says this at length and it is the part to read before running anything
+  unattended.
+
 ## [0.2.0] — 2026-07-15
 
 **Action required:** re-pull image + rebuild squid + edit .env (new MCP credentials)

@@ -9,6 +9,13 @@ ca/*.pem
 ca/*.cer
 !ca/.gitkeep
 
+# Symphony: the work queue and the per-item agent workspaces are local state.
+# Track the queue deliberately if you want its history; it is ignored by
+# default so a scratch queue never lands in a commit.
+symphony-queue/
+symphony-workspaces/
+symphony/WORKFLOW.md
+
 # Local per-developer extras
 user-layer/
 extra-allowlist.d/*.conf

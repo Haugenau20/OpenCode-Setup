@@ -1,0 +1,66 @@
+name: opencode-${PROJECT_SLUG:-default}
+
+# Overlay: the opt-in autonomous orchestrator.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.symphony.yml up -d
+#
+# Nothing in the base stack changes when this file is absent, which is the
+# point: symphony is a different way of working, not a new default. Read
+# docs/SYMPHONY.md before the first run — in particular the part about scoping
+# the GitLab token, which is the containment that actually holds.
+
+services:
+  symphony:
+    image: ${IMAGE_REGISTRY:-opencode-workplace}-symphony:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: symphony/Dockerfile
+      args:
+        SYMPHONY_REF: ${SYMPHONY_REF:-main}
+        SYMPHONY_REPO: ${SYMPHONY_REPO:-https://github.com/Haugenau20/symphony-queue.git}
+    container_name: opencode-symphony-${PROJECT_SLUG:-default}
+    hostname: symphony
+    depends_on:
+      - opencode
+    environment:
+      HOST_UID: ${HOST_UID:-1000}
+      HOST_GID: ${HOST_GID:-1000}
+      SYMPHONY_QUEUE_ROOT: /queue
+      SYMPHONY_WORKSPACES_ROOT: /workspaces
+      SYMPHONY_WORKFLOW: /config/WORKFLOW.md
+      SYMPHONY_OPENCODE_URL: http://opencode:4096
+      SYMPHONY_LOG_LEVEL: ${SYMPHONY_LOG_LEVEL:-info}
+      # Deliberately NO proxy vars and NO service credentials. This container
+      # sits on oc_internal only (see `networks:` below), so it has no route
+      # off the host network in the first place — it talks to opencode and it
+      # moves files. Every credential-bearing operation happens in the opencode
+      # container, behind git-guard and squid.
+    volumes:
+      # The queue. Bind-mounted from the host so `ls`, `mv` and your editor are
+      # the management UI. All six state directories live under this one root:
+      # the claim is a rename(2) between them, which is only atomic within a
+      # single filesystem.
+      - ${SYMPHONY_QUEUE_PATH:-./symphony-queue}:/queue:z
+      # Per-item agent workspaces. NOT your repo at ${REPO_PATH} — symphony
+      # clones fresh per item and must never be pointed at working state you
+      # care about.
+      - ${SYMPHONY_WORKSPACES_PATH:-./symphony-workspaces}:/workspaces:z
+      # WORKFLOW.md — the per-project prompt + config. Read-only: it is trusted
+      # input (it drives hooks), and the agent must never be able to edit it.
+      - ${SYMPHONY_CONFIG_PATH:-./symphony}:/config:ro,z
+    networks:
+      - oc_internal
+    restart: unless-stopped
+
+  # The agent's workspaces have to be visible to the container that actually
+  # runs the agent, at the same path symphony hands it in the prompt.
+  opencode:
+    volumes:
+      - ${SYMPHONY_WORKSPACES_PATH:-./symphony-workspaces}:/workspaces:z
+    environment:
+      # Symphony runs unattended, so remote git must be on. That makes the
+      # destination allowlist the thing standing between a confused agent and
+      # your production repos — but only as defence in depth. The boundary is
+      # the token: see docs/SYMPHONY.md.
+      ALLOW_REMOTE_GIT: ${ALLOW_REMOTE_GIT:-0}
+      GIT_REMOTE_ALLOWLIST: ${GIT_REMOTE_ALLOWLIST:-}

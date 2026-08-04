@@ -175,6 +175,21 @@ Drop a `*.conf` file into `extra-allowlist.d/` (gitignored) and
 `docker compose restart squid`. Same syntax as the shipped allowlist files
 under `squid/allowlist.d/`. You are responsible for what you add.
 
+## Symphony (opt-in, advanced)
+
+A different way of working: instead of you driving one session, an orchestrator
+watches a queue of work items and runs an agent per item, unattended, until each
+is ready for review. The queue is a directory tree — the folder a file sits in
+is its state, `mv` is how you move work, `ls` is the dashboard.
+
+It is off unless you add its compose overlay, and the base stack is unchanged
+while it is off. It runs agents without a human in the loop, so the setup is
+mostly about containment — chiefly a GitLab **group access token** scoped to a
+sandbox group, which is the only control here that holds server-side.
+
+Start with [`docs/SYMPHONY.md`](docs/SYMPHONY.md), including its staged rollout
+(stage 0 needs no remote access at all).
+
 ## Architecture
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full picture
