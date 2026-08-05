@@ -30,8 +30,9 @@ up. The vocabulary:
 ## [Unreleased]
 
 **Action required:** re-pull image + edit .env (new opt-in switches:
-`ALLOW_CONFLUENCE_WRITE`, `ALLOW_GITLAB_WRITE`, `GIT_REMOTE_ALLOWLIST`, plus the
-Symphony keys — every one defaults to today's behaviour)
+`ALLOW_CONFLUENCE_WRITE`, `ALLOW_GITLAB_WRITE`, `GIT_REMOTE_ALLOWLIST`,
+`OPENCODE_INTERNAL_PORT`, plus the Symphony keys — every one defaults to
+today's behaviour)
 
 ### Added
 - **Writing to Confluence**, behind a new `ALLOW_CONFLUENCE_WRITE` gate in
@@ -200,6 +201,43 @@ Symphony keys — every one defaults to today's behaviour)
   `GITLAB_QUEUE_LABEL_PREFIX` and the previously-missed `GIT_REMOTE_ALLOWLIST`.
 - The `gitlab-fetch` skill documents the issue tools, the write surface, the
   one-comment workpad pattern, and what is deliberately impossible.
+- **`OPENCODE_INTERNAL_PORT` is now a real variable** (`.env`, default `4096`)
+  and the four places that hard-coded `4096` derive from it: the oc-publish
+  socat forwarder, the container side of the published port, the symphony
+  overlay's `SYMPHONY_OPENCODE_URL` and symphony's entrypoint fallback. It is
+  deliberately **not** `OPENCODE_PORT` — that is the *host* port, and the two
+  are decoupled so several stacks can differ on the host while all of them stay
+  on 4096 inside. With the variable absent from `.env`, `docker compose config`
+  renders exactly as before.
+
+### Fixed
+- **The symphony workflow prompts never told the agent to clone anything.** The
+  `after_create` hook is empty on purpose — a clone there would force a
+  repository credential into the symphony container, which holds only the
+  Reporter token — and the hook's comment said the agent clones as its first
+  step instead. Nothing said so to the agent, which got an empty workspace, no
+  code, and no instruction to fetch any. Both `WORKFLOW.*.example` files now
+  carry a "First: clone the project" section; the URL comes from that file
+  (trusted config, mounted read-only) and the prompt is explicit that a
+  repository URL found in issue or item text is an attack, not an instruction.
+- **`stall_timeout_ms` is a wall-clock run timeout, not a stall detector**, at
+  the currently pinned `SYMPHONY_REF`: nothing updates the reference timestamp
+  while the agent works, so any run outliving the value is killed however much
+  progress it is making. At the upstream 300000 (5 min) that makes "clone a
+  repo and implement something" impossible. The GitLab example ships 1800000,
+  both examples say what the number actually measures, and `docs/SYMPHONY.md`
+  explains how to tell whether a newer symphony-queue has made it a real
+  detector.
+- **`./scripts/symphony check` cross-checks the two allowlists.**
+  `GIT_REMOTE_ALLOWLIST` (git plane, git-guard) and `GITLAB_WRITE_PROJECTS`
+  (API plane, MCP write gate) express nearly the same intent in two formats and
+  are enforced by different processes, so nothing made them agree — setting one
+  and forgetting the other gives an agent that can push a branch but not open
+  the MR, or the reverse. The preflight is the one place that sees both. It
+  also checks the tracker's own project, which is the destination the workflow
+  explicitly tells the agent to clone. Same normalization and segment-boundary
+  prefix rule both gates already use, so `mygroup` cannot be satisfied by
+  `mygroup-evil`. 10 new bats cases (176 total).
 
 ## [0.2.0] — 2026-07-15
 
