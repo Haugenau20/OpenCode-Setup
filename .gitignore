@@ -9,6 +9,11 @@ ca/*.pem
 ca/*.cer
 !ca/.gitkeep
 
+# Patch files handed over for the symphony-queue repo. They are a delivery
+# artifact for a DIFFERENT repository and must never be committed here.
+patches-symphony-queue/
+*.patch
+
 # Symphony: the work queue and the per-item agent workspaces are local state.
 # Track the queue deliberately if you want its history; it is ignored by
 # default so a scratch queue never lands in a commit.
