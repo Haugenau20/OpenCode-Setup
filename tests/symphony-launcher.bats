@@ -98,6 +98,154 @@ EOF
   [[ "$output" == *"not project-limited"* ]]
 }
 
+# --- allowlist agreement -----------------------------------------------------
+# GIT_REMOTE_ALLOWLIST gates the git plane and GITLAB_WRITE_PROJECTS gates the
+# API plane, in two different processes. Nothing at runtime makes them agree, so
+# a mismatch shows up mid-run as an agent that can push but not open the MR, or
+# the reverse. The preflight is the only place that sees both.
+
+setup_both_planes() {
+  use_gitlab
+  cat >> "$WORK/.env" <<EOF
+SYMPHONY_GITLAB_TOKEN=reporter
+SYMPHONY_HTTP_PROXY=http://squid:3128
+ALLOW_GITLAB_WRITE=1
+EOF
+  sed -i 's/^ALLOW_REMOTE_GIT=0/ALLOW_REMOTE_GIT=1/' "$WORK/.env"
+  sed -i 's#^  base_url:.*#  base_url: https://gitlab.example#' "$WORK/symphony/WORKFLOW.md"
+  sed -i 's#^  project_id:.*#  project_id: mygroup/myproject#'  "$WORK/symphony/WORKFLOW.md"
+}
+
+@test "matching allowlists pass quietly and confirm the tracker project" {
+  setup_both_planes
+  cat >> "$WORK/.env" <<EOF
+GIT_REMOTE_ALLOWLIST=gitlab.example/mygroup/myproject
+GITLAB_WRITE_PROJECTS=mygroup/myproject
+EOF
+  run_launcher check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"is git-reachable and API-writable"* ]]
+  [[ "$output" != *"could not push the branch"* ]]
+  [[ "$output" != *"could not open the merge request"* ]]
+}
+
+@test "warns when a write project is not git-reachable" {
+  setup_both_planes
+  cat >> "$WORK/.env" <<EOF
+GIT_REMOTE_ALLOWLIST=gitlab.example/mygroup/myproject
+GITLAB_WRITE_PROJECTS=mygroup/myproject othergroup/other
+EOF
+  run_launcher check
+  [[ "$output" == *"othergroup/other is in GITLAB_WRITE_PROJECTS"* ]]
+  [[ "$output" == *"could not push the branch"* ]]
+}
+
+@test "warns when a git-pushable destination has no API write permission" {
+  setup_both_planes
+  cat >> "$WORK/.env" <<EOF
+GIT_REMOTE_ALLOWLIST=gitlab.example/mygroup/myproject gitlab.example/spare/repo
+GITLAB_WRITE_PROJECTS=mygroup/myproject
+EOF
+  run_launcher check
+  [[ "$output" == *"spare/repo is pushable per GIT_REMOTE_ALLOWLIST"* ]]
+  [[ "$output" == *"could not open the merge request"* ]]
+}
+
+@test "a broader git allowlist still covers a narrower write project" {
+  # `mygroup` admits `mygroup/myproject` — prefix match on a segment boundary,
+  # the same rule git-guard and the MCP gate already use.
+  setup_both_planes
+  cat >> "$WORK/.env" <<EOF
+GIT_REMOTE_ALLOWLIST=gitlab.example/mygroup
+GITLAB_WRITE_PROJECTS=mygroup
+EOF
+  run_launcher check
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"is in GITLAB_WRITE_PROJECTS but"* ]]
+}
+
+@test "a lookalike group is not covered by a shorter allowlist entry" {
+  # The entry has to be the SHORTER string for this to test anything: a plain
+  # prefix match would let `mygroup` swallow `mygroup-evil/theirs`, which is
+  # precisely the confusion the segment boundary exists to prevent.
+  setup_both_planes
+  cat >> "$WORK/.env" <<EOF
+GIT_REMOTE_ALLOWLIST=gitlab.example/mygroup
+GITLAB_WRITE_PROJECTS=mygroup-evil/theirs
+EOF
+  run_launcher check
+  [[ "$output" == *"mygroup-evil/theirs is in GITLAB_WRITE_PROJECTS"* ]]
+  [[ "$output" == *"could not push the branch"* ]]
+}
+
+@test "warns when the tracker's own project is outside the git allowlist" {
+  # The workflow tells the agent to clone exactly this project, so git-guard
+  # refusing it is a guaranteed failure on the very first command of the run.
+  setup_both_planes
+  cat >> "$WORK/.env" <<EOF
+GIT_REMOTE_ALLOWLIST=gitlab.example/someone-else/theirs
+GITLAB_WRITE_PROJECTS=mygroup/myproject
+EOF
+  run_launcher check
+  [[ "$output" == *"tracker project gitlab.example/mygroup/myproject is not covered by GIT_REMOTE_ALLOWLIST"* ]]
+}
+
+@test "warns when the tracker's own project cannot be written via the API" {
+  setup_both_planes
+  cat >> "$WORK/.env" <<EOF
+GIT_REMOTE_ALLOWLIST=gitlab.example/mygroup/myproject
+GITLAB_WRITE_PROJECTS=someone-else/theirs
+EOF
+  run_launcher check
+  [[ "$output" == *"tracker project mygroup/myproject is not in GITLAB_WRITE_PROJECTS"* ]]
+}
+
+@test "scheme, userinfo, port, .git and case are normalized away before comparing" {
+  # The two variables are written in different formats by different people, so
+  # the comparison has to reduce both to the same shape first — otherwise the
+  # cross-check invents disagreements that are not there, which is worse than
+  # not checking at all.
+  setup_both_planes
+  cat >> "$WORK/.env" <<EOF
+GIT_REMOTE_ALLOWLIST=https://git@gitlab.example:8443/mygroup/myproject.git
+GITLAB_WRITE_PROJECTS=MyGroup/MyProject
+EOF
+  run_launcher check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"is git-reachable and API-writable"* ]]
+  [[ "$output" != *"GITLAB_WRITE_PROJECTS but"* ]]
+  [[ "$output" != *"pushable per GIT_REMOTE_ALLOWLIST"* ]]
+  [[ "$output" != *"is not in GITLAB_WRITE_PROJECTS"* ]]
+}
+
+@test "a numeric project_id is not compared against the allowlists" {
+  # A numeric GitLab id is a valid reference but carries no path, so there is
+  # nothing an allowlist could be matched against. Saying nothing beats a
+  # warning that cannot be acted on.
+  setup_both_planes
+  sed -i 's#^  project_id:.*#  project_id: 4711#' "$WORK/symphony/WORKFLOW.md"
+  cat >> "$WORK/.env" <<EOF
+GIT_REMOTE_ALLOWLIST=gitlab.example/mygroup/myproject
+GITLAB_WRITE_PROJECTS=mygroup/myproject
+EOF
+  run_launcher check
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"tracker project"* ]]
+}
+
+@test "the cross-check stays quiet when only one plane is enabled" {
+  # ALLOW_GITLAB_WRITE off means the write tools are not offered at all, so
+  # GITLAB_WRITE_PROJECTS describes nothing to disagree with.
+  setup_both_planes
+  sed -i 's/^ALLOW_GITLAB_WRITE=1/ALLOW_GITLAB_WRITE=0/' "$WORK/.env"
+  cat >> "$WORK/.env" <<EOF
+GIT_REMOTE_ALLOWLIST=gitlab.example/mygroup/myproject gitlab.example/spare/repo
+GITLAB_WRITE_PROJECTS=mygroup/myproject
+EOF
+  run_launcher check
+  [[ "$output" != *"pushable per GIT_REMOTE_ALLOWLIST"* ]]
+}
+
 @test "refuses when the workspaces mount is the repo itself" {
   # symphony treats workspaces as disposable and clones fresh per item.
   use_file_queue

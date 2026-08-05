@@ -64,6 +64,126 @@ tracker_kind() {
         | sed -n 's/^[[:space:]]*kind:[[:space:]]*\([a-z_]*\).*/\1/p' | head -1
 }
 
+# wf_scalar <key> — first `key: value` in the front matter, comments and quotes
+# stripped. Commented-out lines never match: the key has to start the line
+# (after indentation), so a leading `#` disqualifies it.
+wf_scalar() {
+    [ -f "${WORKFLOW}" ] || return 0
+    sed -n '/^---$/,/^---$/p' "${WORKFLOW}" \
+        | sed -n "s/^[[:space:]]*$1:[[:space:]]*\(.*\)\$/\1/p" | head -1 \
+        | sed 's/[[:space:]]#.*$//; s/[[:space:]]*$//; s/^["'"'"']//; s/["'"'"']$//'
+}
+
+# --- allowlist agreement ------------------------------------------------------
+# GIT_REMOTE_ALLOWLIST (git plane, enforced by opencode/git-guard) and
+# GITLAB_WRITE_PROJECTS (API plane, enforced by the MCP write gate) express
+# nearly the same intent in two formats, and nothing at runtime makes them
+# agree — they are read by different processes gating different protocols, which
+# is why both exist and why neither can check the other. Set one, forget the
+# other, and you get lopsided containment: an agent that pushes a branch it
+# cannot open an MR for, or the reverse. Both failures land mid-run, unattended.
+
+# norm_dest <url|path> — reduce a destination to `host/path`, or a bare project
+# path when there is no host. Drops scheme, userinfo, port, trailing `.git` and
+# surrounding slashes, and lowercases. Same normalization as git-guard's
+# normalize_remote and the MCP gate's normalizeProject, so all three agree on
+# what an entry means.
+norm_dest() {
+    local url="${1}" host rest
+    url="${url%%\?*}"
+    case "${url}" in
+        *://*)
+            url="${url#*://}"; url="${url#*@}"
+            host="${url%%/*}"; rest=""
+            case "${url}" in */*) rest="/${url#*/}" ;; esac
+            host="${host%%:*}"; url="${host}${rest}"
+            ;;
+        /*|./*|../*|~*) ;;
+        *:*) url="${url#*@}"; url="${url%%:*}/${url#*:}" ;;
+    esac
+    url="${url#/}"; url="${url%/}"; url="${url%.git}"
+    printf '%s' "${url}" | tr '[:upper:]' '[:lower:]'
+}
+
+# path_of <host/a/b> — the path part, empty for a host-only entry (which admits
+# every project on that host).
+path_of() {
+    case "${1}" in */*) printf '%s' "${1#*/}" ;; *) printf '' ;; esac
+}
+
+# covered_by <needle> <entry>... — prefix match on a path-segment boundary, so
+# `a/b` admits `a/b` and `a/b/c` and refuses `a/b-evil`. The rule both gates
+# already use. A host-only (empty) entry covers everything.
+covered_by() {
+    local needle="${1}" entry; shift
+    for entry in "$@"; do
+        [ -n "${entry}" ] || return 0
+        case "${needle}/" in "${entry}"/*) return 0 ;; esac
+    done
+    return 1
+}
+
+allowlist_agreement() {
+    local raw e remotes=() remote_paths=() writes=()
+    raw="${GIT_REMOTE_ALLOWLIST:-}"
+    for e in ${raw//,/ }; do
+        e="$(norm_dest "${e}")"; [ -n "${e}" ] && remotes+=("${e}")
+    done
+    raw="${GITLAB_WRITE_PROJECTS:-}"
+    for e in ${raw//,/ }; do
+        e="$(norm_dest "${e}")"; [ -n "${e}" ] && writes+=("${e}")
+    done
+    for e in "${remotes[@]:-}"; do
+        [ -n "${e}" ] && remote_paths+=("$(path_of "${e}")")
+    done
+
+    # Only meaningful when both planes are on AND both are narrowed; the
+    # "switch on, list empty" cases are already warned about above.
+    if [ "${ALLOW_REMOTE_GIT:-0}" = "1" ] && [ "${ALLOW_GITLAB_WRITE:-0}" = "1" ] \
+       && [ "${#remotes[@]}" -gt 0 ] && [ "${#writes[@]}" -gt 0 ]; then
+        for e in "${writes[@]}"; do
+            covered_by "${e}" "${remote_paths[@]}" || {
+                warn "  ! ${e} is in GITLAB_WRITE_PROJECTS but no GIT_REMOTE_ALLOWLIST entry covers it"
+                warn "    the agent could open a merge request there and could not push the branch for it"
+            }
+        done
+        for e in "${remote_paths[@]}"; do
+            [ -n "${e}" ] || continue
+            covered_by "${e}" "${writes[@]}" || {
+                warn "  ! ${e} is pushable per GIT_REMOTE_ALLOWLIST but not in GITLAB_WRITE_PROJECTS"
+                warn "    the agent could push a branch there and could not open the merge request"
+            }
+        done
+    fi
+
+    # The tracker's own project is the one destination that definitely matters:
+    # the workflow tells the agent to clone it, so both gates have to admit it.
+    [ "$(tracker_kind)" = "gitlab" ] || return 0
+    local base project dest
+    base="$(norm_dest "$(wf_scalar base_url)")"
+    project="$(norm_dest "$(wf_scalar project_id)")"
+    [ -n "${base}" ] && [ -n "${project}" ] || return 0
+    # A numeric project_id is a valid GitLab reference but carries no path, so
+    # there is nothing for an allowlist to be compared against.
+    case "${project}" in *[!0-9]*) : ;; *) return 0 ;; esac
+    dest="${base}/${project}"
+
+    if [ "${ALLOW_REMOTE_GIT:-0}" = "1" ] && [ "${#remotes[@]}" -gt 0 ]; then
+        covered_by "${dest}" "${remotes[@]}" \
+            && ok "  ✓ tracker project ${dest} is git-reachable and API-writable" \
+            || {
+                warn "  ! tracker project ${dest} is not covered by GIT_REMOTE_ALLOWLIST"
+                warn "    the workflow tells the agent to clone it and git-guard will refuse"
+            }
+    fi
+    if [ "${ALLOW_GITLAB_WRITE:-0}" = "1" ] && [ "${#writes[@]}" -gt 0 ]; then
+        covered_by "${project}" "${writes[@]}" || {
+            warn "  ! tracker project ${project} is not in GITLAB_WRITE_PROJECTS"
+            warn "    the agent could not open a merge request against the project it is working"
+        }
+    fi
+}
+
 preflight() {
     local fatal=0 kind
     info "preflight (project: ${PROJECT_SLUG})"
@@ -91,7 +211,7 @@ preflight() {
         fi
     fi
 
-    case "$(tracker_kind)" in
+    case "${kind}" in
         gitlab)
             [ -n "${SYMPHONY_GITLAB_TOKEN:-}" ] \
                 && ok "  ✓ SYMPHONY_GITLAB_TOKEN set (should be a Reporter project token)" \
@@ -125,6 +245,8 @@ preflight() {
     if [ "${ALLOW_GITLAB_WRITE:-0}" = "1" ] && [ -z "${GITLAB_WRITE_PROJECTS:-}" ]; then
         warn "  ! ALLOW_GITLAB_WRITE=1 with no GITLAB_WRITE_PROJECTS — writes are not project-limited"
     fi
+
+    allowlist_agreement
 
     # Concurrency/turns come from WORKFLOW.md; surface them because they are the
     # two numbers most worth keeping small while you are still learning.
