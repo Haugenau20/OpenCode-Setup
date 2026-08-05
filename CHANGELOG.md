@@ -238,6 +238,32 @@ today's behaviour)
   explicitly tells the agent to clone. Same normalization and segment-boundary
   prefix rule both gates already use, so `mygroup` cannot be satisfied by
   `mygroup-evil`. 10 new bats cases (176 total).
+- **The symphony image did not set `NODE_EXTRA_CA_CERTS`**, so an on-prem GitLab
+  behind a private CA failed TLS from Node while `curl` in the same container
+  worked. `update-ca-certificates` populates the *system* store and Node ships
+  its own bundle; `opencode/Dockerfile` has bridged that for a while, and the
+  symphony image — written as "no egress, no credentials" — never did.
+- **The GitLab tracker presented a file queue that was not its own.** The six
+  state directories are the `file_queue` tracker's storage; under
+  `tracker.kind: gitlab` they hold nothing, but the launcher and the container
+  entrypoint created them, `status` counted them, and `add` wrote into them. A
+  leftover item from an earlier file-queue run therefore printed as `todo 1`
+  for a queue symphony was not reading. Now nothing creates them under the
+  gitlab tracker, `status` names the project and links the issue board, and
+  `add` refuses with the label to use instead. `symphony-workspaces/` is still
+  created either way — the agent gets one per item whichever tracker produced
+  it. 6 more bats cases (182 total).
+
+### Notes
+- **Found by the first live GitLab run** (previously everything here was tested
+  against mocks only): the biggest failure was in `symphony-queue` rather than
+  this repo — its GitLab tracker called Node's global `fetch`, which is undici,
+  and **undici ignores `HTTP_PROXY`/`HTTPS_PROXY`**. `SYMPHONY_HTTP_PROXY` was
+  therefore set, exported, documented as symphony's egress, and read by nobody;
+  every API call went out direct from `internal: true` networks and died as
+  `TypeError: fetch failed`. Fixed upstream by using undici's `ProxyAgent`, the
+  same way every MCP server in this image already does. If you are pinned to a
+  `SYMPHONY_REF` older than that fix, this is the failure you will see.
 
 ## [0.2.0] — 2026-07-15
 
