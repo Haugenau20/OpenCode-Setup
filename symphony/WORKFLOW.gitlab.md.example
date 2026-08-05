@@ -46,7 +46,29 @@ hooks:
 
 agent:
   max_concurrent_agents: 1
+  # Turn 1 is the task prompt; turns 2..max_turns are continuations. When they
+  # run out the run ends and the issue goes to symphony::review WHETHER OR NOT
+  # anything was produced — running out of turns is a clean exit, not a failure.
+  # 3 is a first-run number. Clone, implement, commit, push and open an MR does
+  # not fit in 3 for a non-frontier model: raise it to 8-12 once a run has
+  # worked end to end.
   max_turns: 3
+  # Sent at the start of every turn after the first. The built-in default is
+  # tracker-neutral and cannot name the finishing step, so name it here — this
+  # is the lever that stops a model polishing until the turns run out.
+  continuation_guidance: |
+    Continuation guidance:
+
+    - Turn {{ turn }} of {{ max_turns }}. {{ turns_remaining }} turn(s) remain after this one.
+    - Resume from the workspace as it stands. Do not restart and do not re-do
+      finished investigation.
+    - You are NOT done until the merge request exists. If the branch is pushed
+      but there is no MR, open it now with `gitlab_create_merge_request`,
+      putting `Closes #<issue number>` in the description.
+    - With one turn left, stop adding work: commit what you have, push, open the
+      MR, and put anything unfinished in the MR description under Blockers.
+    - Update your workpad comment on the issue after each milestone, not on
+      every edit.
   max_retry_backoff_ms: 300000
 
 opencode:

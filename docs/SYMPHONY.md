@@ -325,6 +325,37 @@ and 30 minutes is generous rather than tight. Check the log: a
 `stall_detected` line carrying `sawActivity: false` means the event stream
 never connected and the timeout has quietly gone back to being a run timeout.
 
+## `review` means the agent stopped, not that it finished
+
+Symphony moves an item to `review` on a **clean exit** — the agent's turn loop
+returned without throwing. Running out of `max_turns` is a clean exit. So an
+item can arrive in `symphony::review` with no merge request, no branch, and no
+work at all, and nothing in symphony's log will say so: you will see
+`turnsCompleted: N` against your `max_turns: N` and `state_transitioned_on_exit`.
+
+That equality is the tell. `turnsCompleted` reaching `max_turns` means the agent
+never decided it was done — it was interrupted. A run that genuinely finished
+stops early, and logs `issue_no_longer_active` or a lower `turnsCompleted`.
+
+Two levers, and the second matters more than it looks:
+
+- **`max_turns`.** Turn 1 is the task prompt; turns 2..N are continuations.
+  Clone, implement, commit, push and open an MR does not fit in 3 for a
+  non-frontier model. 8–12 once a run has worked end to end.
+- **`agent.continuation_guidance`.** The nudge sent at the start of every turn
+  after the first. The built-in default is tracker-neutral and cannot name your
+  finishing step, so name it — the GitLab example spends most of its text on
+  "you are not done until the MR exists" and on what to do with one turn left.
+  It is the cheapest correction available for a model that polishes until the
+  turns run out.
+
+When an MR does not appear, symphony's log cannot tell you why; it only knows
+the agent stopped. The evidence is in three places: the workspace on the host
+(`git log`, `git status -sb`, `git ls-remote --heads origin 'symphony/*'` —
+which separates "never cloned" from "committed but never pushed" from "pushed
+but no MR"), the issue's workpad comment, and the OpenCode session named by
+`sessionId` in the log.
+
 ## Workspaces are reclaimed, eventually
 
 Clones are not small and they accumulate. Symphony deletes the workspace of any

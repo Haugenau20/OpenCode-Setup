@@ -254,6 +254,16 @@ today's behaviour)
   created either way — the agent gets one per item whichever tracker produced
   it. 6 more bats cases (182 total).
 
+- **The GitLab workflow example now sets `agent.continuation_guidance`** and
+  documents what `max_turns` actually buys. Turn 1 is the task prompt and turns
+  2..N are continuations; when they run out the run ends and the item goes to
+  `symphony::review` **whether or not anything was produced**, because running
+  out of turns is a clean exit. The continuation prompt is the lever that stops
+  a non-frontier model polishing until the turns are gone, so the example
+  spends it on "you are not done until the merge request exists" and on what to
+  do with one turn left. (`continuation_guidance` requires a `SYMPHONY_REF`
+  carrying the upstream change; older builds ignore the key.)
+
 ### Notes
 - **Found by the first live GitLab run** (previously everything here was tested
   against mocks only): the biggest failure was in `symphony-queue` rather than
