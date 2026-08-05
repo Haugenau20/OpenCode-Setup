@@ -30,12 +30,12 @@ gate() {
 }
 
 @test "writes are off for any value other than 1" {
-  gate "[g.writeEnabled('GITLAB',{GITLAB_ALLOW_WRITE:'0'}), g.writeEnabled('GITLAB',{GITLAB_ALLOW_WRITE:'true'}), g.writeEnabled('GITLAB',{GITLAB_ALLOW_WRITE:'yes'})]"
+  gate "[g.writeEnabled('GITLAB',{ALLOW_GITLAB_WRITE:'0'}), g.writeEnabled('GITLAB',{ALLOW_GITLAB_WRITE:'true'}), g.writeEnabled('GITLAB',{ALLOW_GITLAB_WRITE:'yes'})]"
   [ "$output" = "[false,false,false]" ]
 }
 
 @test "writes are on for exactly 1" {
-  gate "g.writeEnabled('GITLAB', {GITLAB_ALLOW_WRITE:'1'})"
+  gate "g.writeEnabled('GITLAB', {ALLOW_GITLAB_WRITE:'1'})"
   [ "$output" = "true" ]
 }
 
@@ -96,23 +96,23 @@ gate() {
 @test "assertWriteAllowed refuses when the switch is off, and names the switch" {
   gate "g.assertWriteAllowed('GITLAB','any/proj',{})"
   [[ "$output" == THREW:* ]]
-  [[ "$output" == *"GITLAB_ALLOW_WRITE=1"* ]]
+  [[ "$output" == *"ALLOW_GITLAB_WRITE=1"* ]]
 }
 
 @test "assertWriteAllowed passes when the switch is on and no allowlist is set" {
-  gate "(g.assertWriteAllowed('GITLAB','any/proj',{GITLAB_ALLOW_WRITE:'1'}), 'ok')"
+  gate "(g.assertWriteAllowed('GITLAB','any/proj',{ALLOW_GITLAB_WRITE:'1'}), 'ok')"
   [ "$output" = '"ok"' ]
 }
 
 @test "assertWriteAllowed refuses a project outside the allowlist" {
-  gate "g.assertWriteAllowed('GITLAB','other/prod',{GITLAB_ALLOW_WRITE:'1',GITLAB_WRITE_PROJECTS:'mygroup/sandbox'})"
+  gate "g.assertWriteAllowed('GITLAB','other/prod',{ALLOW_GITLAB_WRITE:'1',GITLAB_WRITE_PROJECTS:'mygroup/sandbox'})"
   [[ "$output" == THREW:* ]]
   [[ "$output" == *"other/prod"* ]]
   [[ "$output" == *"mygroup/sandbox"* ]]
 }
 
 @test "assertWriteAllowed permits a project inside the allowlist" {
-  gate "(g.assertWriteAllowed('GITLAB','mygroup/sandbox',{GITLAB_ALLOW_WRITE:'1',GITLAB_WRITE_PROJECTS:'mygroup/sandbox'}), 'ok')"
+  gate "(g.assertWriteAllowed('GITLAB','mygroup/sandbox',{ALLOW_GITLAB_WRITE:'1',GITLAB_WRITE_PROJECTS:'mygroup/sandbox'}), 'ok')"
   [ "$output" = '"ok"' ]
 }
 

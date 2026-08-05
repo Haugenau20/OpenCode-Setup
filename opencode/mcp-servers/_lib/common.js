@@ -101,6 +101,57 @@ export async function jsonGet(url, headers, dispatcher) {
     return { status: res.status, ok: res.ok, data: res.ok ? await res.json() : null };
 }
 
+/**
+ * Send a JSON body to `url` (POST/PUT/…) and return
+ * `{ status, ok, data, error }`.
+ *
+ * Same status-code-inspection contract as jsonGet — callers branch on
+ * `status` themselves rather than this throwing — with one addition: on a
+ * non-2xx it also returns `error`, the server's own explanation, extracted
+ * from the response body. Reads are diagnosable from the status code alone
+ * ("404, no such page"); writes are not. A rejected write is almost always a
+ * 400 whose *only* actionable detail is in the body ("A page with this title
+ * already exists", "Invalid XHTML at line 3"), and without that text the
+ * model is left guessing at what to change.
+ *
+ * The body is truncated to keep a stack-trace-flavoured HTML error page from
+ * flooding the tool result; Confluence's JSON errors carry the useful part in
+ * `.message`, so that is preferred when present.
+ */
+export async function jsonSend(method, url, headers, body, dispatcher) {
+    const res = await undiciFetch(url, {
+        method,
+        headers,
+        body: JSON.stringify(body),
+        dispatcher
+    });
+    if (res.ok) {
+        // 204 No Content (and friends) have no body to parse.
+        const text = await res.text();
+        return { status: res.status, ok: true, data: text ? JSON.parse(text) : null, error: null };
+    }
+    return { status: res.status, ok: false, data: null, error: await errorText(res) };
+}
+
+/** Best-effort human-readable explanation from a failed response body. */
+async function errorText(res) {
+    let text;
+    try {
+        text = await res.text();
+    } catch {
+        return null;
+    }
+    if (!text) return null;
+    try {
+        const parsed = JSON.parse(text);
+        text = parsed.message || parsed.error || parsed.errorMessage || text;
+    } catch {
+        // Not JSON (an HTML error page, typically) — fall through to the raw text.
+    }
+    text = String(text).replace(/\s+/g, " ").trim();
+    return text.length > 500 ? `${text.slice(0, 500)}…` : text;
+}
+
 // ---------------------------------------------------------------------------
 // Tool error formatting
 // ---------------------------------------------------------------------------

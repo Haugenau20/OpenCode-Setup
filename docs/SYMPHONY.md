@@ -192,14 +192,14 @@ the remote is read from the repo the command will actually act on.
 stale branch config, a pasted URL, a hallucinated remote — into a legible local
 error instead of a confusing 403. Do not let it substitute for §1.
 
-### 6. `GITLAB_ALLOW_WRITE` — the MCP write surface
+### 6. `ALLOW_GITLAB_WRITE` — the MCP write surface
 
 The GitLab MCP is read-only until you say otherwise. Unattended runs need more
 than that: the agent has to open merge requests and answer review comments with
 nobody at the keyboard. So:
 
 ```
-GITLAB_ALLOW_WRITE=1
+ALLOW_GITLAB_WRITE=1
 GITLAB_WRITE_PROJECTS=mygroup/my-sandbox-project
 ```
 

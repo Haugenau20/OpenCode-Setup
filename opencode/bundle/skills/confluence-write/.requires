@@ -1,0 +1,2 @@
+mcp=confluence
+env=ALLOW_CONFLUENCE_WRITE=1

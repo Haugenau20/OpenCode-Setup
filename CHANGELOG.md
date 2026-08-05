@@ -29,10 +29,42 @@ up. The vocabulary:
 
 ## [Unreleased]
 
-**Action required:** edit .env (new optional keys) — no image change unless you
-opt into Symphony
+**Action required:** re-pull image + edit .env (new opt-in switches:
+`ALLOW_CONFLUENCE_WRITE`, `ALLOW_GITLAB_WRITE`, `GIT_REMOTE_ALLOWLIST`, plus the
+Symphony keys — every one defaults to today's behaviour)
 
 ### Added
+- **Writing to Confluence**, behind a new `ALLOW_CONFLUENCE_WRITE` gate in
+  `.env` — **default `0`**, and (like every other switch here) only the exact
+  value `1` turns it on. With it set, the Confluence MCP grows four tools:
+  `create_page` (new page in a space, optionally under a `parentId`),
+  `update_page` (replace body and/or title), `append_to_page` (add to the end,
+  keeping existing content) and `add_comment`. This is the first write plane in
+  any of the six MCP servers; it is deliberately shaped after `ALLOW_REMOTE_GIT`
+  — reading a wiki is recoverable, writing to one is visible to everyone.
+- Bodies may be given as Confluence **storage format** (XHTML, the default) or
+  as **wiki markup** (`format="wiki"`, e.g. `h1. Title`), converted by
+  Confluence's own `/rest/api/contentbody/convert/storage` endpoint rather than
+  by a hand-rolled converter here. Markdown is not a Confluence representation
+  and is not accepted.
+- `get_page` gained `format="storage"`, returning the raw markup instead of the
+  lossy plain-text rendering — needed to read a page before an `update_page`
+  that preserves existing content.
+- **`confluence-write`** skill covering the write workflow (choosing where a
+  page goes, checking for an existing page first, storage-vs-wiki, a wiki-markup
+  cheat sheet, always passing a `versionComment`).
+- `.requires` files gained an **`env=NAME=value`** gate alongside `plugin=` and
+  `mcp=`, so a skill can be linked in only when a switch is on. `confluence-write`
+  uses `mcp=confluence` + `env=ALLOW_CONFLUENCE_WRITE=1`, meaning a default
+  install never even tells the agent about tools it doesn't have. Malformed and
+  unknown keys still fail closed.
+- `jsonSend()` in `mcp-servers/_lib/common.js` — the POST/PUT counterpart to
+  `jsonGet()`. It additionally returns the server's own error text on a non-2xx:
+  a failed read is diagnosable from its status code, a rejected write ("a page
+  with this title already exists") is not.
+- Boot log now reports which side of the gate the container came up on:
+  `mcp ro: confluence` / `mcp rw: confluence`.
+
 - **Symphony: opt-in unattended orchestration from a folder queue.** A separate
   image and compose overlay (`docker-compose.symphony.yml`) that watches a
   `symphony-queue/` directory tree and runs an OpenCode agent per work item
@@ -105,7 +137,7 @@ opt into Symphony
   tools `list_issues`, `get_issue`, `get_issue_notes` and `get_pipelines` — the
   server previously had no issue support at all, which the GitLab tracker needs.
 
-  New write tools, **off by default** behind `GITLAB_ALLOW_WRITE=1`:
+  New write tools, **off by default** behind `ALLOW_GITLAB_WRITE=1`:
   `create_merge_request`, `update_merge_request`, `create_mr_note`,
   `create_issue`, `create_issue_note`, `update_issue_note`. Optionally narrowed
   to specific projects with `GITLAB_WRITE_PROJECTS` (whitespace/comma-separated,
@@ -139,8 +171,18 @@ opt into Symphony
   forever. Reuses the generic hook the launcher already uses for `--also`
   mounts, with the overlay playing the launcher's role.
 
+### Notes
+- **Deleting pages is not implemented**, gate or no gate. Edits live in
+  Confluence's version history and are one click from being undone; deletions
+  are not, so they stay a browser action.
+- Writes act as the `CONFLUENCE_PAT` owner and appear under that name in the
+  page history. A 403 on write with a working read means that account lacks
+  add/edit rights in the target space.
+- Existing installs are unaffected until they opt in: with the variable absent
+  the server registers exactly the five read tools it always had.
+
 ### Changed
-- `opencode/manifest.json` gains `GITLAB_ALLOW_WRITE`, `GITLAB_WRITE_PROJECTS`,
+- `opencode/manifest.json` gains `ALLOW_GITLAB_WRITE`, `GITLAB_WRITE_PROJECTS`,
   `GITLAB_QUEUE_LABEL_PREFIX` and the previously-missed `GIT_REMOTE_ALLOWLIST`.
 - The `gitlab-fetch` skill documents the issue tools, the write surface, the
   one-comment workpad pattern, and what is deliberately impossible.

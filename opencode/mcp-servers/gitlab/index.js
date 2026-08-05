@@ -19,7 +19,7 @@
  *   get_issue_notes        — comments on an issue
  *   get_pipelines          — CI pipelines for a ref (is the branch green?)
  *
- * Write tools (ONLY when GITLAB_ALLOW_WRITE=1 — see below):
+ * Write tools (ONLY when ALLOW_GITLAB_WRITE=1 — see below):
  *   create_issue           — file a follow-up (reserved labels refused)
  *   create_issue_note      — comment on an issue
  *   update_issue_note      — edit a comment in place (the workpad pattern)
@@ -72,7 +72,7 @@ const GITLAB_PAT = process.env.GITLAB_PAT;
 // baked bundle; fix the CA, don't disable the check.
 const proxyAgent = makeDispatcher();
 
-// Write gate. OFF unless GITLAB_ALLOW_WRITE=1, optionally narrowed further by
+// Write gate. OFF unless ALLOW_GITLAB_WRITE=1, optionally narrowed further by
 // GITLAB_WRITE_PROJECTS (whitespace/comma-separated project paths or ids,
 // prefix-matched on a path-segment boundary — same rule as
 // GIT_REMOTE_ALLOWLIST). Read once at startup for the tool listing; every write
@@ -299,7 +299,7 @@ const GetPipelinesSchema = z.object({
     limit: z.number().int().min(1).max(50).default(10).describe("Max pipelines (default 10)"),
 });
 
-// --- writes (only reachable when GITLAB_ALLOW_WRITE=1) ---
+// --- writes (only reachable when ALLOW_GITLAB_WRITE=1) ---
 
 const CreateIssueSchema = z.object({
     ...ProjectArg,
@@ -956,7 +956,7 @@ const READ_TOOLS = [
     },
 ];
 
-// Offered only when GITLAB_ALLOW_WRITE=1. Hiding them is not the enforcement —
+// Offered only when ALLOW_GITLAB_WRITE=1. Hiding them is not the enforcement —
 // the handlers re-check — but a capability the model is never shown is a
 // capability it never wastes a turn trying to use.
 const WRITE_TOOLS = [
@@ -1076,7 +1076,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (WRITE_TOOL_NAMES.has(name) && !WRITES_ENABLED) {
             throw new Error(
                 `Tool "${name}" writes to GitLab and writes are disabled. ` +
-                `Set GITLAB_ALLOW_WRITE=1 in .env and restart to enable them. ` +
+                `Set ALLOW_GITLAB_WRITE=1 in .env and restart to enable them. ` +
                 `Do not route around this by calling the API directly — the setting is deliberate.`
             );
         }

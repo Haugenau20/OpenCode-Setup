@@ -20,9 +20,14 @@
  * with plain `node -e`, without any server's node_modules.
  */
 
-/** True when writes are enabled for `service` (e.g. "GITLAB"). Default: off. */
+/**
+ * True when writes are enabled for `service` (e.g. "GITLAB"). Default: off.
+ * The variable is `ALLOW_<SERVICE>_WRITE`, matching ALLOW_REMOTE_GIT and
+ * ALLOW_CONFLUENCE_WRITE — every switch in this image reads ALLOW_* and only
+ * the exact value "1" turns one on.
+ */
 export function writeEnabled(service, env = process.env) {
-    return env[`${service}_ALLOW_WRITE`] === "1";
+    return env[`ALLOW_${service}_WRITE`] === "1";
 }
 
 /**
@@ -69,7 +74,7 @@ export function projectAllowed(project, allowlist) {
 export function assertWriteAllowed(service, project, env = process.env) {
     if (!writeEnabled(service, env)) {
         throw new Error(
-            `${service} writes are disabled. This tool needs ${service}_ALLOW_WRITE=1 in .env. ` +
+            `${service} writes are disabled. This tool needs ALLOW_${service}_WRITE=1 in .env. ` +
             `Do not attempt to work around this by calling the API directly — the setting is deliberate.`
         );
     }

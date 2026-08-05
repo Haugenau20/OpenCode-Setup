@@ -106,7 +106,7 @@ thread of twenty status comments is noise for whoever reviews this.
 before calling it. Update the workpad after each meaningful milestone, not on
 every edit.
 
-These tools exist only when `GITLAB_ALLOW_WRITE=1`. If you cannot see them,
+These tools exist only when `ALLOW_GITLAB_WRITE=1`. If you cannot see them,
 writes are off for this deployment — say so in your final message and carry on
 without a workpad rather than looking for another route.
 

@@ -1,6 +1,6 @@
 ---
 name: gitlab-fetch
-description: "Fetches code context from the internal GitLab instance using the GitLab MCP tools — projects, commits, merge requests (with review comments/notes), MR diffs and changed files, and file contents. Use whenever the user wants to look up, fetch, find, search, browse, or cross-reference GitLab — even if they don't say 'GitLab' explicitly. Especially for the Jira → GitLab cross-reference: tracing a ticket to the commits/MRs that implemented it, reading an MR's diff or review discussion, finding which MR introduced a change, or reading a source file at a given ref. Trigger phrases include 'find the MR for PROJ-123', 'what changed in project X', 'show commits mentioning VAE-45', 'read file Y from gitlab repo Z', 'why was this implemented this way'. Also covers GitLab issues (read, and comment/create when writes are enabled) and opening or updating merge requests during unattended runs."
+description: "Fetches code context from the internal GitLab instance using the GitLab MCP tools — projects, commits, merge requests (with review comments/notes), MR diffs and changed files, and file contents. Use whenever the user wants to look up, fetch, find, search, browse, or cross-reference GitLab — even if they don't say 'GitLab' explicitly. Especially for the Jira → GitLab cross-reference: tracing a ticket to the commits/MRs that implemented it, reading an MR's diff or review discussion, finding which MR introduced a change, or reading a source file at a given ref. Trigger phrases include 'find the MR for PROJ-123', 'what changed in project X', 'show commits mentioning VAE-45', 'read file Y from gitlab repo Z', 'why was this implemented this way'. Also covers GitLab issues and CI pipeline status. Read-only; writing is the separate gitlab-write skill."
 ---
 
 # GitLab MCP — Agent Skill
@@ -147,53 +147,6 @@ global `id` field. Passing the wrong one 404s.
 `gitlab_list_issues` **ANDs** its `labels` filter: every label listed must be
 present. GitLab has no OR, so to match any-of, fetch broadly and filter yourself.
 
-### Writes are off by default
-
-Creating and editing things needs `GITLAB_ALLOW_WRITE=1` in `.env`, and may be
-narrowed further to specific projects with `GITLAB_WRITE_PROJECTS`. When the
-switch is off the write tools are not offered at all — if you do not see them,
-they are disabled, which is a deployment decision and not a problem to solve.
-
-```
-gitlab_create_merge_request(project, sourceBranch, targetBranch, title, description)
-gitlab_update_merge_request(project, mrIid, title?, description?)
-gitlab_create_mr_note(project, mrIid, body)
-gitlab_create_issue(project, title, description?, labels?)
-gitlab_create_issue_note(project, issueIid, body)
-gitlab_update_issue_note(project, issueIid, noteId, body)
-```
-
-**If a write is refused, report it and stop.** Do not fall back to `curl`, to
-`glab`, or to a different project. The refusal is the configuration working.
-
-### Keeping a progress log to one comment
-
-Post once, then edit that note — do not append a new comment per update. A
-reviewer opening the issue should find one current summary, not twenty stale
-ones.
-
-```
-1. gitlab_get_issue_notes(project, issueIid)
-   → look for your own marker heading, e.g. "## Workpad"
-2. found?  gitlab_update_issue_note(project, issueIid, noteId, body)
-   not found? gitlab_create_issue_note(project, issueIid, body)
-```
-
-`update_issue_note` **replaces** the body outright, so build the whole new text
-before you call it.
-
-### Opening a merge request
-
-Put `Closes #N` in the description. That is what links the MR to its issue, and
-that link is what a human reviews.
-
-Opening the MR is where your work ends. Merging is a human decision, and the
-token you are given cannot do it — a 403 on merge is expected, not a puzzle.
-
-### What you cannot do, by design
-
-There is no tool to set an issue's labels, close or reopen an issue, or merge an
-MR. In the symphony workflow an issue's `symphony::` label **is** its workflow
-state and the orchestrator owns every transition. `gitlab_create_issue` refuses
-labels in that namespace, so a follow-up you file arrives unlabelled and a human
-decides whether it enters the queue. Do not try to work around this.
+Writing — opening merge requests, commenting, filing issues — lives in the
+separate **`gitlab-write`** skill, which is present only when
+`ALLOW_GITLAB_WRITE=1`. If you do not see it, this deployment is read-only.
