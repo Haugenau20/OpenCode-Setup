@@ -28,7 +28,12 @@ services:
       SYMPHONY_QUEUE_ROOT: /queue
       SYMPHONY_WORKSPACES_ROOT: /workspaces
       SYMPHONY_WORKFLOW: /config/WORKFLOW.md
-      SYMPHONY_OPENCODE_URL: http://opencode:4096
+      # Follows the opencode container's INTERNAL port, not OPENCODE_PORT: this
+      # is a container-to-container URL on an internal network, so the host
+      # publication is irrelevant to it. Keep opencode.server_url in
+      # WORKFLOW.md pointing at the same place — that is what the orchestrator
+      # actually dials; this one drives the entrypoint's readiness wait.
+      SYMPHONY_OPENCODE_URL: http://opencode:${OPENCODE_INTERNAL_PORT:-4096}
       SYMPHONY_LOG_LEVEL: ${SYMPHONY_LOG_LEVEL:-info}
       # Only set for tracker.kind: gitlab. Leave blank for the file queue and
       # this container keeps its stronger posture: no credentials at all.

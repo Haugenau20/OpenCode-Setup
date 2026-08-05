@@ -10,7 +10,10 @@ HOST_GID="${HOST_GID:-1000}"
 QUEUE_ROOT="${SYMPHONY_QUEUE_ROOT:-/queue}"
 WORKSPACES_ROOT="${SYMPHONY_WORKSPACES_ROOT:-/workspaces}"
 WORKFLOW="${SYMPHONY_WORKFLOW:-/config/WORKFLOW.md}"
-SERVER_URL="${SYMPHONY_OPENCODE_URL:-http://opencode:4096}"
+# Compose sets SYMPHONY_OPENCODE_URL; the fallback is for running this image by
+# hand. Both derive from the opencode container's INTERNAL port — never
+# OPENCODE_PORT, which is the host publication and means nothing on this network.
+SERVER_URL="${SYMPHONY_OPENCODE_URL:-http://opencode:${OPENCODE_INTERNAL_PORT:-4096}}"
 
 if [ -f /app/.baked-commit ]; then
     log "symphony-queue $(cat /app/.baked-commit)"

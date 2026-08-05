@@ -27,7 +27,13 @@ services:
       # policy.yaml for the full rationale.
       NO_PROXY: "localhost,127.0.0.1,::1,opencode,squid,rag"
       no_proxy: "localhost,127.0.0.1,::1,opencode,squid,rag"
-      OPENCODE_INTERNAL_PORT: "4096"
+      # The in-container listen port. Everything that must agree on it — the
+      # oc-publish socat forwarder below, the symphony overlay's
+      # SYMPHONY_OPENCODE_URL — reads the same variable, so there is one place
+      # to change it. NOT OPENCODE_PORT: that is the HOST port, and the two are
+      # decoupled precisely so several stacks can differ on the host while all
+      # of them stay on 4096 inside.
+      OPENCODE_INTERNAL_PORT: "${OPENCODE_INTERNAL_PORT:-4096}"
       # opencode-pty viewer: force the plugin to bind non-loopback (so oc-publish
       # can reach it) and to a fixed, per-instance port DERIVED from OPENCODE_PORT
       # by prepending a '1' (main 4096 -> viewer 14096). This keeps the viewer far
@@ -61,7 +67,8 @@ services:
   # modern Docker won't bind its published port on the host. This minimal socat
   # forwarder lives on a normal (non-internal) bridge — so ITS ports can be
   # published — plus oc_proxy, so it can reach opencode. It runs two socat
-  # listeners: 4096 -> opencode:4096 (the OpenCode server) and
+  # listeners: ${OPENCODE_INTERNAL_PORT} -> opencode:${OPENCODE_INTERNAL_PORT}
+  # (the OpenCode server) and
   # 1${OPENCODE_PORT} -> opencode:1${OPENCODE_PORT} (e.g. 14096, the opencode-pty
   # web viewer, only live when that plugin is enabled and its server is started
   # via /pty-open-background-spy). It is not an open proxy and grants opencode no
@@ -76,11 +83,13 @@ services:
     command:
       - |
         trap 'kill 0' TERM INT
-        socat TCP-LISTEN:4096,fork,reuseaddr TCP:opencode:4096 &
+        socat TCP-LISTEN:${OPENCODE_INTERNAL_PORT:-4096},fork,reuseaddr TCP:opencode:${OPENCODE_INTERNAL_PORT:-4096} &
         socat TCP-LISTEN:1${OPENCODE_PORT:-4096},fork,reuseaddr TCP:opencode:1${OPENCODE_PORT:-4096} &
         wait
     ports:
-      - "127.0.0.1:${OPENCODE_PORT:-4096}:4096"
+      # host:container — OPENCODE_PORT is the host side (change it per stack),
+      # OPENCODE_INTERNAL_PORT the container side (leave it alone).
+      - "127.0.0.1:${OPENCODE_PORT:-4096}:${OPENCODE_INTERNAL_PORT:-4096}"
       - "127.0.0.1:1${OPENCODE_PORT:-4096}:1${OPENCODE_PORT:-4096}"
     networks:
       - oc_proxy
