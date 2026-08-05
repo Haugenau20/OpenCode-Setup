@@ -550,6 +550,36 @@ SRC='source "$ENTRYPOINT"'
   [ "$status" -eq 0 ]
 }
 
+@test "skill_gate_ok: env gate passes only when the variable equals the required value" {
+  local f="$BATS_TEST_TMPDIR/.requires"; printf 'env=ALLOW_CONFLUENCE_WRITE=1\n' > "$f"
+  run bash -c "$SRC"'; ALLOW_CONFLUENCE_WRITE=1; skill_gate_ok "'"$f"'"'
+  [ "$status" -eq 0 ]
+  run bash -c "$SRC"'; ALLOW_CONFLUENCE_WRITE=0; skill_gate_ok "'"$f"'"'
+  [ "$status" -ne 0 ]
+}
+
+@test "skill_gate_ok: env gate fails closed when the variable is unset or truthy-but-not-the-value" {
+  local f="$BATS_TEST_TMPDIR/.requires"; printf 'env=ALLOW_CONFLUENCE_WRITE=1\n' > "$f"
+  run bash -c "$SRC"'; unset ALLOW_CONFLUENCE_WRITE; skill_gate_ok "'"$f"'"'
+  [ "$status" -ne 0 ]
+  run bash -c "$SRC"'; ALLOW_CONFLUENCE_WRITE=true; skill_gate_ok "'"$f"'"'
+  [ "$status" -ne 0 ]
+}
+
+@test "skill_gate_ok: a malformed env gate (no value) fails closed" {
+  local f="$BATS_TEST_TMPDIR/.requires"; printf 'env=ALLOW_CONFLUENCE_WRITE\n' > "$f"
+  run bash -c "$SRC"'; ALLOW_CONFLUENCE_WRITE=1; skill_gate_ok "'"$f"'"'
+  [ "$status" -ne 0 ]
+}
+
+@test "skill_gate_ok: every line must hold — mcp present but env gate off still fails" {
+  local f="$BATS_TEST_TMPDIR/.requires"; printf 'mcp=confluence\nenv=ALLOW_CONFLUENCE_WRITE=1\n' > "$f"
+  run bash -c "$SRC"'; MCPS_ENABLED_SET=" confluence "; ALLOW_CONFLUENCE_WRITE=0; skill_gate_ok "'"$f"'"'
+  [ "$status" -ne 0 ]
+  run bash -c "$SRC"'; MCPS_ENABLED_SET=" confluence "; ALLOW_CONFLUENCE_WRITE=1; skill_gate_ok "'"$f"'"'
+  [ "$status" -eq 0 ]
+}
+
 @test "skill_gate_ok: an unknown key fails closed" {
   local f="$BATS_TEST_TMPDIR/.requires"; printf 'wat=whatever\n' > "$f"
   run bash -c "$SRC"'; PLUGINS_ENABLED_SET=" opencode-pty "; MCPS_ENABLED_SET=" jira "; skill_gate_ok "'"$f"'"'

@@ -70,7 +70,7 @@ builds the merged config.
 > via the `ENABLED_PLUGINS` variable in `.env`. See
 > [`ADDING_PLUGINS.md`](ADDING_PLUGINS.md).
 
-## Conditional skills (gate on a plugin or MCP)
+## Conditional skills (gate on a plugin, an MCP, or a switch)
 
 A bundled skill that only makes sense when a specific plugin or MCP server is
 active can declare that dependency, and the entrypoint links it **only when that
@@ -96,14 +96,29 @@ mcp=jira
   `DISABLE_<SVC>_MCP=1`. This is the very same check that decides whether the
   server gets wired into `opencode.json`, so a skill can never advertise a
   service that isn't running.
+- **`env=<NAME>=<value>`** — linked only when that `.env` variable holds exactly
+  that value. For skills that document a capability a **switch** turns on, where
+  the MCP being up isn't enough:
+
+  ```
+  # opencode/bundle/skills/confluence-write/.requires
+  mcp=confluence
+  env=ALLOW_CONFLUENCE_WRITE=1
+  ```
+
+  The comparison is literal string equality, matching how the switches
+  themselves are read everywhere else — `env=ALLOW_CONFLUENCE_WRITE=1` is not
+  satisfied by `true` or `yes`. A line with no `=` in the value (`env=FOO`) is
+  malformed and fails closed with a log line.
 
 Multiple lines are ANDed; an unknown key fails closed (the skill is skipped); no
 `.requires` file means unconditional (the default). The gate applies to skills
 only — agents and commands are flat `.md` files and can't carry one.
 
 The shipped `*-fetch` skills use `mcp=…` so they appear only when their service
-is configured, and `pty-sessions` uses `plugin=opencode-pty` so it appears only
-when that plugin is enabled.
+is configured, `pty-sessions` uses `plugin=opencode-pty` so it appears only when
+that plugin is enabled, and `confluence-write` combines `mcp=` with `env=` so it
+appears only when Confluence is configured *and* writing to it is allowed.
 
 ## Global house rules (`AGENTS.md`)
 

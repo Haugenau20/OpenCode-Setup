@@ -93,19 +93,34 @@ mcp_credentials_present() {
 }
 
 # Should a bundled item carrying a `.requires` file be linked? The file lists one
-# `plugin=<name>` or `mcp=<name>` per line; the item is linked only if EVERY named
-# provider is active — the plugin is in PLUGINS_ENABLED_SET, or the MCP is in
-# MCPS_ENABLED_SET (both computed in main() §3a before the symlink loop runs).
+# `plugin=<name>`, `mcp=<name>`, or `env=<NAME>=<value>` per line; the item is
+# linked only if EVERY line holds — the plugin is in PLUGINS_ENABLED_SET, the MCP
+# is in MCPS_ENABLED_SET (both computed in main() §3a before the symlink loop
+# runs), and the env var equals the required value exactly.
 # No `.requires` file means unconditional (callers test that before calling here).
 # Unknown keys fail closed. Space-padding makes the grep a whole-word test.
+#
+# `env=` exists for skills that document a capability an env switch turns on —
+# e.g. `env=ALLOW_CONFLUENCE_WRITE=1` for the Confluence write skill, whose
+# instructions describe tools that do not exist while the switch is off. The
+# comparison is a literal string equality against the value the switch must
+# have, matching how those switches are checked everywhere else (only "1" is on).
 skill_gate_ok() {
-    local file="$1" key val
+    local file="$1" key val name want
     while IFS='=' read -r key val; do
         val="${val%$'\r'}"
         case "${key}" in
             ''|\#*) continue ;;
             plugin) printf ' %s ' "${PLUGINS_ENABLED_SET:-}" | grep -q " ${val} " || return 1 ;;
             mcp)    printf ' %s ' "${MCPS_ENABLED_SET:-}"    | grep -q " ${val} " || return 1 ;;
+            env)
+                case "${val}" in
+                    *=*) ;;
+                    *) log "skill_gate: malformed env gate 'env=${val}' in ${file} (want env=NAME=value) — failing closed"; return 1 ;;
+                esac
+                name="${val%%=*}"; want="${val#*=}"
+                [ "${!name:-}" = "${want}" ] || return 1
+                ;;
             *) log "skill_gate: unknown key '${key}' in ${file} — failing closed"; return 1 ;;
         esac
     done < "${file}"
@@ -483,6 +498,18 @@ for entry in ${MCP_SERVICES}; do
         log "mcp off: ${svc} (set ${hint} to enable)"
     fi
 done
+
+# The Confluence server is the one MCP with a write plane, gated the same way
+# remote git is (§8): default off, only "1" turns it on. Surface which side of
+# that gate this boot landed on — the server itself just silently registers
+# fewer tools, which is invisible from outside the container.
+if printf ' %s ' "${MCPS_ENABLED_SET}" | grep -q " confluence "; then
+    if [ "${ALLOW_CONFLUENCE_WRITE:-0}" = "1" ]; then
+        log "mcp rw:  confluence (ALLOW_CONFLUENCE_WRITE=1 — can create and edit pages)"
+    else
+        log "mcp ro:  confluence (set ALLOW_CONFLUENCE_WRITE=1 to allow page writes)"
+    fi
+fi
 
 # ---- 4c. Extra instruction files (generic hook) ------------------------------
 # Append any paths in OPENCODE_EXTRA_INSTRUCTIONS to opencode.json's

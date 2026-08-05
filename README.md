@@ -62,6 +62,8 @@ If something doesn't work, run `./scripts/doctor.sh` first.
   developer, no network needed. Run `/plugins` to see them.
 - A git safety gate: remote operations (`push`, `fetch`, `pull`, `clone`)
   are blocked unless `ALLOW_REMOTE_GIT=1` in `.env`.
+- The same gate for the wiki: the Confluence MCP can only read pages unless
+  `ALLOW_CONFLUENCE_WRITE=1` in `.env`.
 - Per-project persistent session/conversation logs.
 - Three-network docker topology so opencode has no direct route to the
   internet.
@@ -158,16 +160,21 @@ off.
 
 ## MCP servers (Bitbucket, GitLab, Jira, JFrog & Confluence)
 
-Five first-party, **read-only** MCP servers ship in the image, giving the agent
+Five first-party, **read-only by default** MCP servers ship in the image, giving the agent
 direct access to the internal Bitbucket, GitLab, Jira, JFrog Artifactory, and
 Confluence instances (PRs/MRs, diffs, commits, files; issues + JQL search;
 artifacts, versions + build-info; wiki pages + CQL search). Each **auto-enables
 when its credentials are set** in `.env` — no separate switch — and a single PAT
 per service serves both git and the REST API where applicable, so no account
 password is stored. Bitbucket and GitLab also act as git remotes over HTTPS;
-Jira, JFrog and Confluence are API-only. Full detail (env vars, the
-HTTP-vs-HTTPS gotcha, the Confluence 8090 port, TLS, adding more services) in
-[`docs/MCP_SERVERS.md`](docs/MCP_SERVERS.md).
+Jira, JFrog and Confluence are API-only.
+
+Confluence is the one server that can also **write** — creating and editing wiki
+pages — and only when you opt in with `ALLOW_CONFLUENCE_WRITE=1` in `.env`,
+mirroring the git gate. Off by default the write tools aren't registered at all,
+and deleting pages is never possible. Full detail (env vars, the write tools and
+body formats, the HTTP-vs-HTTPS gotcha, the Confluence 8090 port, TLS, adding
+more services) in [`docs/MCP_SERVERS.md`](docs/MCP_SERVERS.md).
 
 ## Per-developer allowlist additions
 

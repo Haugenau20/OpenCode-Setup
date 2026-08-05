@@ -24,17 +24,23 @@ time so nothing hits npm at container start.
   use GitLab/Bitbucket.
 - **Confluence** (`opencode/mcp-servers/confluence/`): `get_page` (by id, or by
   space+title), `search` (CQL), `get_page_children`, `list_spaces`,
-  `get_current_user`. This is the *documentation/wiki* plane — pages live in a
-  **space** (by space key) and form a tree of numeric **content ids**. For
-  issues use Jira; for source use GitLab/Bitbucket.
+  `get_current_user` — plus, **only** when `ALLOW_CONFLUENCE_WRITE=1`,
+  `create_page`, `update_page`, `append_to_page` and `add_comment` (see
+  [Writing to Confluence](#writing-to-confluence-allow_confluence_write)). This
+  is the *documentation/wiki* plane — pages live in a **space** (by space key)
+  and form a tree of numeric **content ids**. For issues use Jira; for source
+  use GitLab/Bitbucket.
 - **M-Files** (`opencode/mcp-servers/mfiles/`): `list_object_types`,
   `list_classes`, `search_objects`, `get_object`, `get_object_properties`,
   `get_file_content`. This is the *document-management* (DMS) plane — objects
   are addressed by an **object type id** + **object id**, not a file path. Use
   Jira for issues, GitLab/Bitbucket for source, and Confluence for wiki pages.
 
-Read-only by design — there is no push/comment/deploy capability, mirroring the
-`git:ro`-by-default posture. Every tool issues GETs **except** JFrog's
+Read-only by default — mirroring the `git:ro`-by-default posture. Confluence is
+the one server with a write plane at all, and it is off unless you explicitly
+opt in with `ALLOW_CONFLUENCE_WRITE=1`; none of the other five can push, comment
+or deploy under any setting. With the switch off every tool issues GETs
+**except** JFrog's
 `aql_search`, which uses POST — but only because an AQL query rides in the
 request **body** (like an Elasticsearch `_search`), not because it writes. AQL's
 sole operation is `find`; the language cannot express a mutation, so the posture
@@ -63,6 +69,52 @@ independent — you can have API access without git, or vice versa.
 Credential presence is the gate because the servers **exit on boot** without
 their env; registering one with no creds would just produce a noisy failed
 attach. When creds are absent the entrypoint omits the block entirely.
+
+## Writing to Confluence (`ALLOW_CONFLUENCE_WRITE`)
+
+Enabling the Confluence MCP gets you a **read-only** wiki client. Creating and
+editing pages is a second, separate opt-in — the same shape as
+`ALLOW_REMOTE_GIT`, and for the same reason: reading someone's wiki is
+recoverable, writing to it is visible to the whole company.
+
+```dotenv
+# .env
+ALLOW_CONFLUENCE_WRITE=1
+```
+
+Restart the stack for it to take effect (re-run the launcher / `scripts/opencode`).
+
+| Tool              | What it does                                                          |
+|-------------------|-----------------------------------------------------------------------|
+| `create_page`     | New page in a space, optionally under a `parentId`                     |
+| `update_page`     | Replace the body and/or title of an existing page                      |
+| `append_to_page`  | Add to the end of a page, leaving existing content intact              |
+| `add_comment`     | Post a comment on a page                                               |
+
+**Only the exact value `1` enables writes** — `true`, `yes` and an empty value
+all leave the server read-only, matching every other switch in `.env`. When the
+gate is off the four tools are **never registered**: the model does not see them
+in the tool list and cannot call them, which is why there is no "write refused"
+error to handle. `[entrypoint] mcp ro: confluence` / `mcp rw: confluence` in the
+boot log tells you which side of the gate the container came up on.
+
+Notes:
+
+- **Deleting is not implemented**, gate or no gate. Every edit is kept in
+  Confluence's version history and is one "Restore this version" click from
+  being undone; a deletion is not, so it stays a browser action.
+- Writes act as the `CONFLUENCE_PAT` owner and show up under that name in the
+  page history. A 403 on a write with a working read means that account lacks
+  add/edit rights in the target space.
+- Bodies are Confluence **storage format** (XHTML). The tools also accept
+  `format="wiki"` (Confluence wiki markup, e.g. `h1. Title`) and convert it via
+  Confluence's own `/rest/api/contentbody/convert/storage` endpoint. Markdown is
+  not a Confluence representation and is not accepted.
+- `get_page` gained `format="storage"`, which returns the raw markup instead of
+  the lossy text rendering — read a page that way before an `update_page` that
+  needs to preserve existing content.
+- The **`confluence-write`** skill documents this workflow and is linked into
+  the config only when the switch is on (via `env=` in its `.requires`).
 
 ## How auth is wired (no passwords, no hand-encoding)
 
@@ -283,6 +335,12 @@ verification.
   (`get_page_children`), or discovering spaces (`list_spaces`). A common
   cross-reference is **Jira → Confluence**: from a ticket to its linked spec or
   runbook page.
+- The **`confluence-write`** skill covers the write side — publishing a new page
+  into a space, replacing or appending to an existing one, and commenting —
+  including where to put a page, the storage-format vs. wiki-markup choice, and
+  a wiki-markup cheat sheet. It is linked in **only** when
+  `ALLOW_CONFLUENCE_WRITE=1`, so on a default install the agent is never told
+  about tools it does not have.
 - The **`mfiles-fetch`** skill drives the M-Files tools for document-management
   lookups — discovering object types/classes (`list_object_types`,
   `list_classes`), free-text search (`search_objects`), fetching an object's
