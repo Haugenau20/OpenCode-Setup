@@ -255,3 +255,14 @@ shell_files() {
   ! grep -qE 'state_event|"PUT", `/projects/\$\{encodeProjectId\(project\)\}/issues/\$\{issueIid\}`' "$src"
   ! grep -q '/merge_requests/${mrIid}/merge' "$src"
 }
+
+@test "symphony overlay: the agent's workspace root is pre-approved for external access" {
+  # opencode's permission.external_directory defaults to "ask". Symphony's
+  # workspaces live outside the /workspace project root, so without this the
+  # first file operation of an unattended run blocks on a prompt nobody can
+  # answer. Guards against the mount and the permission drifting apart.
+  overlay="$REPO_ROOT/docker-compose.symphony.yml"
+  [ -f "$overlay" ] || skip "symphony overlay not present"
+  grep -q 'OPENCODE_EXTRA_ALLOWED_DIRS: /workspaces/\*\*' "$overlay"
+  grep -q ':/workspaces:z' "$overlay"
+}

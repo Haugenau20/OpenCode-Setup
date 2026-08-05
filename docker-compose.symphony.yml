@@ -74,6 +74,16 @@ services:
     volumes:
       - ${SYMPHONY_WORKSPACES_PATH:-./symphony-workspaces}:/workspaces:z
     environment:
+      # Symphony's per-item workspaces sit OUTSIDE the /workspace project root,
+      # and opencode gates any tool touching an external path behind
+      # `permission.external_directory`, which defaults to "ask". Unattended
+      # means nobody is there to answer, so without this the very first file
+      # operation of every run blocks forever.
+      #
+      # This is the same generic hook the launcher uses for its --also mounts;
+      # here the overlay plays the launcher's role. Only this glob is allowed —
+      # everything else still hits the "ask" default.
+      OPENCODE_EXTRA_ALLOWED_DIRS: /workspaces/**
       # Symphony runs unattended, so remote git must be on. That makes the
       # destination allowlist the thing standing between a confused agent and
       # your production repos — but only as defence in depth. The boundary is

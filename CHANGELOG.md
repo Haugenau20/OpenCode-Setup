@@ -131,6 +131,14 @@ opt into Symphony
   the tracker landed: the agent can now keep one running comment on its issue
   via `get_issue_notes` + `update_issue_note`.
 
+- **`OPENCODE_EXTRA_ALLOWED_DIRS: /workspaces/**` on the symphony overlay.**
+  opencode gates any tool touching a path outside the `/workspace` project root
+  behind `permission.external_directory`, which defaults to `ask`. Symphony's
+  per-item workspaces live outside it, and unattended means nobody is there to
+  answer — so without this the first file operation of every run would block
+  forever. Reuses the generic hook the launcher already uses for `--also`
+  mounts, with the overlay playing the launcher's role.
+
 ### Changed
 - `opencode/manifest.json` gains `GITLAB_ALLOW_WRITE`, `GITLAB_WRITE_PROJECTS`,
   `GITLAB_QUEUE_LABEL_PREFIX` and the previously-missed `GIT_REMOTE_ALLOWLIST`.
