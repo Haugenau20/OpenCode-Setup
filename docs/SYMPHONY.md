@@ -171,6 +171,10 @@ Either way, keep the `after_create` hook empty and let the agent clone as its
 first step. A clone in the hook would force a *repository* credential into this
 container, which is the line worth holding.
 
+That is only half a decision, though — see [The agent clones its own
+workspace](#the-agent-clones-its-own-workspace) for the other half, which is
+making sure the prompt actually tells it to.
+
 ### 5. `GIT_REMOTE_ALLOWLIST` — defence in depth, not a boundary
 
 `ALLOW_REMOTE_GIT=1` is required for symphony, and it is binary: once on, every
@@ -238,6 +242,68 @@ by the agent *and* by anyone with project access. Treat both as hostile input.
 The corollary for you: **`WORKFLOW.md` is trusted config and is mounted
 read-only.** It drives the hooks. Never template a hook from item content.
 
+## The agent clones its own workspace
+
+Symphony creates an **empty** directory per item at
+`symphony-workspaces/<id>/` and hands the agent its path. It does not put
+anything in it. The reason is §4 above: a clone on symphony's side needs a
+repository credential, and symphony is the container that deliberately does not
+have one.
+
+So the clone is the agent's first step, and **the workflow prompt has to say
+so** — an empty directory and no instruction is just an agent with no code.
+Both `WORKFLOW.*.example` files carry a "First: clone the project" section for
+this. Edit the URL in it to match your project.
+
+The URL lives in `WORKFLOW.md` and nowhere else. That file is trusted config,
+mounted read-only. An issue description is not: it is writable by the agent and
+by anyone with project access, so "clone from … first" inside an issue is an
+attack, not an instruction. The prompt says this to the agent in as many words,
+because the untrusted-input rule is only as good as the agent's willingness to
+follow it.
+
+Two lines duplicate `tracker.project_id` as a result. That is deliberate: the
+clone URL has to be somewhere the agent reads, and this is the only file it can
+safely come from. `./scripts/symphony check` cross-checks the two, along with
+`GIT_REMOTE_ALLOWLIST` and `GITLAB_WRITE_PROJECTS`, so a mismatch is caught
+before a run rather than during one.
+
+## What `stall_timeout_ms` actually measures
+
+Today it is a **run** timeout, not a stall detector. Symphony stamps the moment
+a run starts and — at the pinned `SYMPHONY_REF` — nothing updates that stamp
+while the agent works, so a run is killed once it has simply been *alive* this
+long, however much progress it is making.
+
+The upstream default is 300000 (5 minutes). That is fine for a stage-0
+hello-world item and far too short for anything that clones a repository:
+**raise it to 1800000 (30 minutes) before the first real run.** The GitLab
+example already does.
+
+Newer symphony-queue turns it into a real stall detector by feeding agent
+activity — turn boundaries plus the session's SDK event stream — into the
+reference timestamp, at which point the number means "silent for this long"
+and 30 minutes is generous rather than tight. Check the log: a
+`stall_detected` line carrying `sawActivity: false` means the event stream
+never connected and the timeout has quietly gone back to being a run timeout.
+
+## Workspaces are reclaimed, eventually
+
+Clones are not small and they accumulate. Symphony deletes the workspace of any
+item that has reached a **terminal** state — `symphony::done` or
+`symphony::cancelled`, `done/` or `cancelled/`.
+
+Terminal is a human decision and nothing notifies symphony of it, so this is
+driven by the poll: newer symphony-queue sweeps on every tick, older builds
+only at process start (meaning a long-lived orchestrator reclaimed nothing
+until you restarted it). Either way the trigger is the same, and it is the same
+trigger as everything else in this design: **`review/ → done/` is yours to
+make.** An item parked in `review/` keeps its clone, by design — that is what
+you review.
+
+Nothing watches merge-request state. A merged MR does not move an item to
+`done` on its own.
+
 ## Setup
 
 ### 1. A separate stack
@@ -275,8 +341,13 @@ SYMPHONY_HTTP_PROXY=http://squid:3128
 
 # Leave every other *_PAT blank.
 
+# Two gates, two planes: git (enforced by opencode/git-guard) and the API
+# (enforced by the MCP write gate). They are read by different processes, so
+# they cannot check each other — `./scripts/symphony check` does that for them.
 ALLOW_REMOTE_GIT=1
 GIT_REMOTE_ALLOWLIST=gitlab.internal.example/my-group/my-project
+ALLOW_GITLAB_WRITE=1
+GITLAB_WRITE_PROJECTS=my-group/my-project
 
 SYMPHONY_REF=v0.1.0
 SYMPHONY_QUEUE_PATH=./symphony-queue
@@ -311,6 +382,12 @@ symphony's when you label it `symphony::todo`.
 
 Front matter is config, the body is the agent's prompt template (Liquid). Start
 with `max_concurrent_agents: 1` and `max_turns: 3`.
+
+Three things in the copied file need your attention before the first run:
+`tracker.base_url` and `tracker.project_id` in the front matter, the clone URL
+in the prompt's "First: clone the project" section, and `stall_timeout_ms` —
+which measures the wrong thing at the pinned ref and needs to be generous
+because of it. Both are explained above.
 
 ### 5. Up
 
@@ -359,6 +436,86 @@ multiplies whatever it already does.
 **Production repos.** Only via a group token scoped to exactly them, Developer
 role, protected branches. Never a personal PAT, at any stage.
 
+## The first run against a real GitLab project
+
+Nothing here has touched a live GitLab API — the tracker and all six write
+tools are unit-tested against mocks. So do this once, deliberately, against a
+project you would not mind losing.
+
+**1. A sandbox project.** A new GitLab project with a small real repository in
+it. In *Settings → Repository → Protected branches*, protect `main`: **No one**
+may push, merge via MR only. That single setting is what makes the rest of this
+recoverable.
+
+**2. Six labels**, in *Project information → Labels*:
+
+```
+symphony::todo  symphony::in-progress  symphony::review
+symphony::done  symphony::failed       symphony::cancelled
+```
+
+An issue carrying none of them is not symphony's and is ignored, which is how
+an ordinary backlog lives in the same project. On Premium these are scoped
+labels and mutually exclusive in the UI; on Free they are ordinary labels and
+symphony enforces exclusivity itself by rewriting the whole set on every
+transition. Nothing behaves differently.
+
+**3. Two project access tokens**, in *Settings → Access tokens*. Not one used
+twice — the split is the containment (§3 above), and the preflight warns if
+they match:
+
+| Token | Role | Scopes | Goes in |
+|---|---|---|---|
+| symphony's | **Reporter** | `api` | `SYMPHONY_GITLAB_TOKEN` |
+| the agent's | **Developer** | `api`, `write_repository` | `GITLAB_PAT` |
+
+**4. `.env`**, on top of the base config in Setup above:
+
+```
+ALLOW_REMOTE_GIT=1
+GIT_REMOTE_ALLOWLIST=gitlab.example/mygroup/myproject
+ALLOW_GITLAB_WRITE=1
+GITLAB_WRITE_PROJECTS=mygroup/myproject
+SYMPHONY_HTTP_PROXY=http://squid:3128
+```
+
+Both allowlists, both formats. `check` cross-checks them against each other and
+against the tracker's project, so a typo in one is caught before the run.
+
+**5. `WORKFLOW.md`:**
+
+```
+cp symphony/WORKFLOW.gitlab.md.example symphony/WORKFLOW.md
+```
+
+Set `tracker.base_url` and `tracker.project_id`, and **edit the clone URL in
+the "First: clone the project" section to match**. Keep
+`max_concurrent_agents: 1` and `max_turns` low, and leave `stall_timeout_ms` at
+the 1800000 the example ships with.
+
+**6. Go.**
+
+```
+./scripts/symphony check     # fix everything it complains about first
+./scripts/symphony up
+./scripts/symphony logs      # leave this running
+```
+
+Then create an issue, label it `symphony::todo`, and watch.
+
+**What to expect when it breaks.** In rough order of likelihood:
+
+- **The clone fails.** Wrong URL in `WORKFLOW.md`, or a destination
+  `GIT_REMOTE_ALLOWLIST` does not admit. `check` catches both; if it did not,
+  the agent's first bash command is where to look.
+- **The run is killed after a few minutes.** `stall_timeout_ms` too low for
+  work that clones a repository. Look for `stall_detected` in the log.
+- **403s.** Check which token: symphony's Reporter token *cannot* open merge
+  requests, and that is correct — the agent's Developer token does that. A 403
+  on merge is also expected; merging is a human decision.
+- **Nothing is picked up at all.** Label names must match `label_prefix`
+  exactly, `::` and all.
+
 ## Operating it
 
 **Stop it.** `./scripts/symphony stop` halts dispatch. In-flight items stay
@@ -398,13 +555,25 @@ To ship a change: cut a tag in `symphony-queue`, bump `SYMPHONY_REF`, rebuild.
 
 ## Known limits
 
-- **Bitbucket/GitLab MCPs are read-only.** The agent can read MR comments but
-  cannot reply or merge, so `review/ → done/` is human-driven by construction.
-  That is the intended shape for now, not a gap to close.
+- **Never run against a real GitLab instance yet.** `GitLabTracker` and all six
+  MCP write tools are unit-tested against mocks and have not touched a live
+  API. Assume the first run finds bugs; see the checklist above for where to
+  look.
+- **The agent cannot close the loop.** With `ALLOW_GITLAB_WRITE=1` it can open
+  merge requests and answer review comments, but there is deliberately no tool
+  to relabel an issue, close one, or merge an MR — the `symphony::` namespace
+  is workflow state and the orchestrator owns every transition. So
+  `review → done` is human-driven by construction. That is the intended shape,
+  not a gap to close.
+- **Nothing watches merge-request state.** An MR being merged does not move its
+  item to `done`, and therefore does not reclaim its workspace. Polling MR
+  state would need the API token and is a separate change.
+- **Recovery re-runs side effects.** An item recovered from `in-progress/` is
+  re-dispatched from the start rather than resuming its OpenCode session. The
+  `session_id` field exists in the schema for a future resume path and is
+  unused.
 - **No cross-machine coordination.** On `file_queue` the queue is a directory on
   one host, and sharing it over a network filesystem would break the `rename(2)`
   atomicity argument. On `gitlab` there is no atomic claim at all, so two
   orchestrators against one project can double-dispatch. One orchestrator is the
   supported deployment either way.
-- **Recovery re-runs side effects.** An item recovered from `in-progress/` is
-  re-dispatched from the start rather than resuming its OpenCode session.
