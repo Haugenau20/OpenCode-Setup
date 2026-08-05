@@ -264,13 +264,48 @@ preflight() {
 
 ensure_dirs() {
     local d
+    # Workspaces are used by both trackers — the agent gets one per item
+    # whatever the queue is made of. The six state directories are the file
+    # queue's storage and mean nothing under the gitlab tracker, so creating
+    # them there would be inventing a second, empty board next to the real one.
+    mkdir -p "${WORKSPACES_PATH}"
+    [ "$(tracker_kind)" = "gitlab" ] && return 0
     for d in todo in-progress review done failed cancelled; do
         mkdir -p "${QUEUE_PATH}/${d}"
     done
-    mkdir -p "${WORKSPACES_PATH}"
+}
+
+container_state() {
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "${SYMPHONY_CONTAINER}"; then
+        printf '\n  symphony: running\n'
+    else
+        printf '\n  symphony: NOT running\n'
+    fi
 }
 
 queue_status() {
+    # Report the board symphony is actually reading. Printing file counts under
+    # the gitlab tracker is worse than printing nothing: leftovers from an
+    # earlier file-queue run show up as "todo 1" for a queue symphony is not
+    # looking at, which reads as work that is about to be picked up.
+    if [ "$(tracker_kind)" = "gitlab" ]; then
+        local base project
+        base="$(wf_scalar base_url)"
+        project="$(wf_scalar project_id)"
+        printf '\n  tracker: gitlab — %s\n' "${project:-<project_id unset>}"
+        if [ -n "${base}" ] && [ -n "${project}" ]; then
+            case "${project}" in
+                *[!0-9]*) printf '    board: %s/%s/-/issues?label_name[]=%s::todo\n' \
+                              "${base%/}" "${project}" "$(wf_scalar label_prefix)" ;;
+                *)        printf '    board: %s (project id %s)\n' "${base%/}" "${project}" ;;
+            esac
+        fi
+        printf '    queue state lives in the issues themselves — ./scripts/symphony logs\n'
+        printf '\n  workspaces: %s\n' "${WORKSPACES_PATH}"
+        container_state
+        return 0
+    fi
+
     local d n total=0
     printf '\n  queue: %s\n' "${QUEUE_PATH}"
     for d in todo in-progress review failed done cancelled; do
@@ -279,11 +314,7 @@ queue_status() {
         [ "${n}" -gt 0 ] && printf '    %-12s %s\n' "${d}" "${n}" || printf '    %-12s -\n' "${d}"
     done
     [ "${total}" -eq 0 ] && printf '\n  queue is empty — add work with: ./scripts/symphony add "..."\n'
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "${SYMPHONY_CONTAINER}"; then
-        printf '\n  symphony: running\n'
-    else
-        printf '\n  symphony: NOT running\n'
-    fi
+    container_state
 }
 
 # --- verbs -------------------------------------------------------------------
@@ -331,6 +362,14 @@ case "${cmd}" in
         ;;
 
     add)
+        # Under the gitlab tracker a file in todo/ is read by nothing. Writing
+        # one and reporting success would leave you waiting on work that was
+        # never queued.
+        if [ "$(tracker_kind)" = "gitlab" ]; then
+            red "the tracker is gitlab — work items are GitLab issues, not files."
+            red "  create an issue and label it $(wf_scalar label_prefix)::todo"
+            exit 1
+        fi
         [ "$#" -ge 1 ] || { red 'usage: ./scripts/symphony add "what the agent should do" [--id ID] [--title TITLE]'; exit 1; }
         body="$1"; shift
         id=""; title=""

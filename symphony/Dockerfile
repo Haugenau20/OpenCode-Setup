@@ -74,8 +74,18 @@ COPY --from=build /build/.baked-commit    /app/.baked-commit
 COPY symphony/entrypoint.sh /usr/local/bin/symphony-entrypoint
 RUN chmod +x /usr/local/bin/symphony-entrypoint
 
-# No secrets, no egress, no git remote of its own — see the header.
+# No secrets and no git remote of its own — see the header. Egress is the one
+# claim in that header that stops being true under tracker.kind: gitlab, where
+# symphony reaches the API through squid.
+#
+# NODE_EXTRA_CA_CERTS matches opencode/Dockerfile: update-ca-certificates above
+# put the corp CA in the SYSTEM store, and Node does not read the system store —
+# it ships its own bundle. Without this line an on-prem GitLab behind a private
+# CA fails TLS from this container while curl in the same container succeeds,
+# which is a genuinely confusing half-hour. squid CONNECTs rather than
+# intercepting, so the certificate Node validates is GitLab's own.
 ENV NODE_ENV=production \
-    SYMPHONY_WORKFLOW=/config/WORKFLOW.md
+    SYMPHONY_WORKFLOW=/config/WORKFLOW.md \
+    NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
 ENTRYPOINT ["/usr/local/bin/symphony-entrypoint"]

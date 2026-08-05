@@ -27,12 +27,23 @@ if [ "$(id -u)" = "0" ]; then
     groupmod -g "${HOST_GID}" dev 2>/dev/null || true
 fi
 
-# The six state directories must exist and must share one filesystem — the
-# claim is a rename(2) between them, which is only atomic within a device.
-for dir in todo in-progress review done failed cancelled; do
-    mkdir -p "${QUEUE_ROOT}/${dir}"
-done
+# Workspaces are per-item and exist under either tracker.
 mkdir -p "${WORKSPACES_ROOT}"
+
+# The six state directories are the FILE QUEUE's storage. They must exist and
+# must share one filesystem — the claim is a rename(2) between them, which is
+# only atomic within a device. Under the gitlab tracker they store nothing, and
+# creating them anyway leaves an empty board on the host next to the real one.
+tracker_kind() {
+    [ -f "${WORKFLOW}" ] || return 0
+    sed -n '/^---$/,/^---$/p' "${WORKFLOW}" \
+        | sed -n 's/^[[:space:]]*kind:[[:space:]]*\([a-z_]*\).*/\1/p' | head -1
+}
+if [ "$(tracker_kind)" != "gitlab" ]; then
+    for dir in todo in-progress review done failed cancelled; do
+        mkdir -p "${QUEUE_ROOT}/${dir}"
+    done
+fi
 
 if [ "$(id -u)" = "0" ]; then
     chown -R "${HOST_UID}:${HOST_GID}" "${QUEUE_ROOT}" "${WORKSPACES_ROOT}" || true

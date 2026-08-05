@@ -55,6 +55,13 @@ symphony-queue/
 └── cancelled/     # you moved it here
 ```
 
+This is the `file_queue` tracker's storage and only its storage. Under
+`tracker.kind: gitlab` the state lives in issue labels, these directories hold
+nothing, and neither the launcher nor the container creates them —
+`./scripts/symphony status` shows the project instead, and `add` refuses rather
+than writing a file nothing reads. `symphony-workspaces/` is created either way:
+the agent gets one per item regardless of where the item came from.
+
 One markdown file per item. **The directory it sits in is its state** — there is
 no database and no status field. Moving a card is `mv`. Looking at the board is
 `ls`. That is the whole reason there is no dashboard.
@@ -166,6 +173,37 @@ On `gitlab` it needs to reach the API, so it gets the Reporter token above and
 so squid remains the only way out and the existing
 `squid/allowlist.d/30-gitlab.conf` entry is all it can reach. That is a real
 reduction from "holds nothing", and the Reporter role is the compensation.
+
+Two things have to be true for that proxy to work at all, and both were missed
+the first time:
+
+- **Symphony's code has to use the proxy explicitly.** Node's global `fetch` is
+  undici, and **undici ignores `HTTP_PROXY`/`HTTPS_PROXY`**. Setting the
+  variable is not enough — something has to build a `ProxyAgent` from it. Every
+  MCP server in the opencode image does (`opencode/mcp-servers/_lib/common.js`);
+  symphony-queue's GitLab tracker did not, so the first live run failed on its
+  first API call with `TypeError: fetch failed` while the proxy sat unused.
+  Fixed in symphony-queue — if you are pinned to a `SYMPHONY_REF` older than
+  that fix, this is the bug you will hit.
+- **Node has to trust your CA.** `update-ca-certificates` in the image populates
+  the *system* store, and Node ships its own bundle and does not read the system
+  one. `NODE_EXTRA_CA_CERTS` in `symphony/Dockerfile` is what bridges that. The
+  symptom without it is TLS failing from Node while `curl` in the same container
+  succeeds.
+
+The quickest way to tell these apart from inside the container — `curl` honours
+the proxy variables, Node does not:
+
+```
+docker exec opencode-symphony-<slug> \
+  curl -sS -o /dev/null -w '%{http_code}\n' https://<your-gitlab>/api/v4/version
+docker exec opencode-symphony-<slug> \
+  node -e 'fetch("https://<your-gitlab>/api/v4/version").then(r=>console.log(r.status)).catch(e=>console.log(e.cause?.code??e.message))'
+```
+
+`curl` working while Node fails is the proxy problem. Both failing on TLS is the
+CA problem. Both failing to connect is squid's allowlist — add your host under
+`extra-allowlist.d/`.
 
 Either way, keep the `after_create` hook empty and let the agent clone as its
 first step. A clone in the hook would force a *repository* credential into this
@@ -505,6 +543,12 @@ Then create an issue, label it `symphony::todo`, and watch.
 
 **What to expect when it breaks.** In rough order of likelihood:
 
+- **`TypeError: fetch failed` on the very first poll**, before any issue is
+  picked up. Symphony cannot reach GitLab: proxy, CA, or squid allowlist. See
+  §4 above for the three-way split and the two commands that tell them apart.
+  On a `SYMPHONY_REF` new enough to carry the fix, the log says which — look for
+  `gitlab_tracker_ready` with `viaProxy: true` at startup, and a connection
+  error naming an errno rather than "fetch failed".
 - **The clone fails.** Wrong URL in `WORKFLOW.md`, or a destination
   `GIT_REMOTE_ALLOWLIST` does not admit. `check` catches both; if it did not,
   the agent's first bash command is where to look.

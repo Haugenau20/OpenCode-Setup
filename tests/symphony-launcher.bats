@@ -304,6 +304,74 @@ EOF
   [[ "$output" == *"in-progress"* ]]
 }
 
+# --- the file queue is not the gitlab tracker's board -------------------------
+# Under tracker.kind: gitlab the six state directories store nothing. Creating
+# them, counting them, or writing into them presents an empty second board next
+# to the real one — and leftovers from an earlier file-queue run read as work
+# about to be picked up.
+
+@test "gitlab: status names the project instead of counting local files" {
+  use_gitlab
+  echo "SYMPHONY_GITLAB_TOKEN=x" >> "$WORK/.env"
+  echo "SYMPHONY_HTTP_PROXY=http://squid:3128" >> "$WORK/.env"
+  sed -i 's#^  project_id:.*#  project_id: mygroup/myproject#' "$WORK/symphony/WORKFLOW.md"
+  run_launcher status
+  [[ "$output" == *"tracker: gitlab"* ]]
+  [[ "$output" == *"mygroup/myproject"* ]]
+  [[ "$output" != *"queue is empty"* ]]
+}
+
+@test "gitlab: a stale file queue is not reported as pending work" {
+  use_gitlab
+  mkdir -p "$WORK/q/todo"
+  echo "leftover" > "$WORK/q/todo/SYM-999-old.md"
+  run_launcher status
+  [[ "$output" != *"todo         1"* ]]
+}
+
+# `up` runs preflight and ensure_dirs before it ever touches docker, so a
+# DOCKER_HOST that cannot connect stops it exactly after the part under test.
+run_up() { run bash -c 'cd "$1" && DOCKER_HOST=unix:///nonexistent ./scripts/symphony up' _ "$WORK"; }
+
+@test "gitlab: starting the stack creates workspaces but no local queue board" {
+  use_gitlab
+  echo "SYMPHONY_GITLAB_TOKEN=x" >> "$WORK/.env"
+  echo "SYMPHONY_HTTP_PROXY=http://squid:3128" >> "$WORK/.env"
+  run_up
+  [ -d "$WORK/ws" ]
+  [ ! -d "$WORK/q/todo" ]
+  [ ! -d "$WORK/q/cancelled" ]
+}
+
+@test "file queue: starting the stack creates all six state directories" {
+  # They must exist and share one filesystem — the claim is a rename(2) between
+  # them, which is only atomic within a device.
+  use_file_queue
+  run_up
+  [ -d "$WORK/ws" ]
+  for d in todo in-progress review done failed cancelled; do
+    [ -d "$WORK/q/$d" ]
+  done
+}
+
+@test "gitlab: add refuses and says how to queue work instead" {
+  use_gitlab
+  run_launcher add "do the thing"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"work items are GitLab issues"* ]]
+  [[ "$output" == *"symphony::todo"* ]]
+  [ ! -d "$WORK/q/todo" ]
+}
+
+@test "file queue: status and add are unchanged" {
+  use_file_queue
+  run_launcher add "do the thing" --id SYM-7
+  [ "$status" -eq 0 ]
+  [ -d "$WORK/q/todo" ]
+  run_launcher status
+  [[ "$output" == *"queue: ./q"* ]]
+}
+
 @test "an unknown verb fails and prints usage" {
   run_launcher frobnicate
   [ "$status" -eq 1 ]
