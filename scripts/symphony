@@ -1,0 +1,268 @@
+#!/usr/bin/env bash
+# Host-side wrapper for the symphony overlay — the counterpart to
+# ./scripts/opencode. Composes the right -f flags, refuses to start on a
+# misconfiguration that would otherwise fail confusingly ten minutes in, and
+# gives you the handful of verbs you actually need while testing.
+#
+#   ./scripts/symphony up          # build if needed + start + show status
+#   ./scripts/symphony logs        # follow the orchestrator log
+#   ./scripts/symphony status      # queue counts, per-state
+#   ./scripts/symphony watch       # status, refreshed
+#   ./scripts/symphony add "..."   # drop a new item into todo/
+#   ./scripts/symphony stop        # stop symphony, leave opencode running
+#   ./scripts/symphony down        # stop the whole stack
+#   ./scripts/symphony build       # rebuild the symphony image
+#   ./scripts/symphony check       # preflight only, change nothing
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${ROOT}"
+
+red()  { printf '\033[31m%s\033[0m\n' "$*" >&2; }
+warn() { printf '\033[33m%s\033[0m\n' "$*" >&2; }
+ok()   { printf '\033[32m%s\033[0m\n' "$*"; }
+info() { printf '%s\n' "$*"; }
+
+# Load .env WITHOUT sourcing it — same reasoning as scripts/opencode: sourcing
+# executes each line, so an unquoted multi-word value becomes a command.
+load_env() {
+    local file="$1" line
+    while IFS= read -r line || [ -n "${line}" ]; do
+        line="${line%$'\r'}"
+        case "${line}" in ''|\#*) continue ;; esac
+        case "${line}" in [A-Za-z_]*=*) export "${line}" ;; esac
+    done < "${file}"
+}
+
+[ -f .env ] || { red "no .env found. Copy .env.example to .env and edit it first."; exit 1; }
+load_env ./.env
+
+PROJECT_SLUG="${PROJECT_SLUG:-default}"
+QUEUE_PATH="${SYMPHONY_QUEUE_PATH:-./symphony-queue}"
+WORKSPACES_PATH="${SYMPHONY_WORKSPACES_PATH:-./symphony-workspaces}"
+CONFIG_PATH="${SYMPHONY_CONFIG_PATH:-./symphony}"
+WORKFLOW="${CONFIG_PATH}/WORKFLOW.md"
+SYMPHONY_CONTAINER="opencode-symphony-${PROJECT_SLUG}"
+
+COMPOSE=(docker compose -f docker-compose.yml)
+[ -n "${USER_LAYER_PATH:-}" ] && COMPOSE+=(-f docker-compose.user-layer.yml)
+COMPOSE+=(-f docker-compose.symphony.yml)
+# Developing symphony-queue itself: bind-mount a host checkout over the baked
+# build. Opt in by setting SYMPHONY_SRC_PATH in .env.
+if [ -n "${SYMPHONY_SRC_PATH:-}" ]; then
+    COMPOSE+=(-f docker-compose.symphony-dev.yml)
+fi
+
+# --- preflight ---------------------------------------------------------------
+# Everything here is a mistake that otherwise surfaces as a confusing failure
+# well after start-up, or worse, as an unattended agent doing something you did
+# not intend. Cheap to check, expensive to debug.
+
+tracker_kind() {
+    [ -f "${WORKFLOW}" ] || return 0
+    sed -n '/^---$/,/^---$/p' "${WORKFLOW}" \
+        | sed -n 's/^[[:space:]]*kind:[[:space:]]*\([a-z_]*\).*/\1/p' | head -1
+}
+
+preflight() {
+    local fatal=0 kind
+    info "preflight (project: ${PROJECT_SLUG})"
+
+    if [ ! -f "${WORKFLOW}" ]; then
+        red "  ✗ no ${WORKFLOW}"
+        red "    cp ${CONFIG_PATH}/WORKFLOW.md.example ${WORKFLOW}          # file queue"
+        red "    cp ${CONFIG_PATH}/WORKFLOW.gitlab.md.example ${WORKFLOW}   # GitLab issues"
+        fatal=1
+    else
+        kind="$(tracker_kind)"
+        ok "  ✓ workflow: ${WORKFLOW} (tracker: ${kind:-unknown})"
+    fi
+
+    # The workspaces bind mount must never be your real repo: symphony clones
+    # per item and treats the directory as disposable.
+    local ws_abs repo_abs
+    ws_abs="$(cd "$(dirname "${WORKSPACES_PATH}")" 2>/dev/null && pwd)/$(basename "${WORKSPACES_PATH}")" || ws_abs="${WORKSPACES_PATH}"
+    if [ -n "${REPO_PATH:-}" ]; then
+        repo_abs="$(cd "${REPO_PATH}" 2>/dev/null && pwd)" || repo_abs=""
+        if [ -n "${repo_abs}" ] && [ "${ws_abs}" = "${repo_abs}" ]; then
+            red "  ✗ SYMPHONY_WORKSPACES_PATH is the same directory as REPO_PATH"
+            red "    symphony treats workspaces as disposable — point it somewhere else"
+            fatal=1
+        fi
+    fi
+
+    case "$(tracker_kind)" in
+        gitlab)
+            [ -n "${SYMPHONY_GITLAB_TOKEN:-}" ] \
+                && ok "  ✓ SYMPHONY_GITLAB_TOKEN set (should be a Reporter project token)" \
+                || { red "  ✗ tracker is gitlab but SYMPHONY_GITLAB_TOKEN is empty"; fatal=1; }
+            [ -n "${SYMPHONY_HTTP_PROXY:-}" ] \
+                && ok "  ✓ SYMPHONY_HTTP_PROXY set (symphony reaches GitLab via squid)" \
+                || { red "  ✗ tracker is gitlab but SYMPHONY_HTTP_PROXY is empty — symphony has no egress"; fatal=1; }
+            if [ "${SYMPHONY_GITLAB_TOKEN:-}" = "${GITLAB_PAT:-}" ] && [ -n "${GITLAB_PAT:-}" ]; then
+                warn "  ! SYMPHONY_GITLAB_TOKEN and GITLAB_PAT are the same token"
+                warn "    the split only means anything if symphony's is Reporter and the agent's is Developer"
+            fi
+            ;;
+        file_queue|"")
+            [ -z "${SYMPHONY_GITLAB_TOKEN:-}" ] \
+                && ok "  ✓ file queue: symphony holds no credentials" \
+                || warn "  ! SYMPHONY_GITLAB_TOKEN is set but the tracker is the file queue — it is unused"
+            ;;
+    esac
+
+    if [ "${ALLOW_REMOTE_GIT:-0}" = "1" ]; then
+        if [ -n "${GIT_REMOTE_ALLOWLIST:-}" ]; then
+            ok "  ✓ remote git ON, restricted to: ${GIT_REMOTE_ALLOWLIST}"
+        else
+            warn "  ! remote git is ON and GIT_REMOTE_ALLOWLIST is EMPTY"
+            warn "    an unattended agent may push to any remote its token can reach"
+        fi
+    else
+        ok "  ✓ remote git OFF — the agent can commit but cannot push (good for early runs)"
+    fi
+
+    if [ "${ALLOW_GITLAB_WRITE:-0}" = "1" ] && [ -z "${GITLAB_WRITE_PROJECTS:-}" ]; then
+        warn "  ! ALLOW_GITLAB_WRITE=1 with no GITLAB_WRITE_PROJECTS — writes are not project-limited"
+    fi
+
+    # Concurrency/turns come from WORKFLOW.md; surface them because they are the
+    # two numbers most worth keeping small while you are still learning.
+    if [ -f "${WORKFLOW}" ]; then
+        local turns conc
+        turns="$(sed -n 's/^[[:space:]]*max_turns:[[:space:]]*\([0-9]*\).*/\1/p' "${WORKFLOW}" | head -1)"
+        conc="$(sed -n 's/^[[:space:]]*max_concurrent_agents:[[:space:]]*\([0-9]*\).*/\1/p' "${WORKFLOW}" | head -1)"
+        info "  · max_turns=${turns:-?}  max_concurrent_agents=${conc:-?}"
+        [ -n "${conc}" ] && [ "${conc}" -gt 1 ] 2>/dev/null \
+            && warn "  ! more than one agent at a time — consider 1 until you trust a full run"
+    fi
+
+    [ "${fatal}" -eq 0 ] || { red "preflight failed — nothing started."; exit 1; }
+}
+
+ensure_dirs() {
+    local d
+    for d in todo in-progress review done failed cancelled; do
+        mkdir -p "${QUEUE_PATH}/${d}"
+    done
+    mkdir -p "${WORKSPACES_PATH}"
+}
+
+queue_status() {
+    local d n total=0
+    printf '\n  queue: %s\n' "${QUEUE_PATH}"
+    for d in todo in-progress review failed done cancelled; do
+        n=$(find "${QUEUE_PATH}/${d}" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
+        total=$((total + n))
+        [ "${n}" -gt 0 ] && printf '    %-12s %s\n' "${d}" "${n}" || printf '    %-12s -\n' "${d}"
+    done
+    [ "${total}" -eq 0 ] && printf '\n  queue is empty — add work with: ./scripts/symphony add "..."\n'
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "${SYMPHONY_CONTAINER}"; then
+        printf '\n  symphony: running\n'
+    else
+        printf '\n  symphony: NOT running\n'
+    fi
+}
+
+# --- verbs -------------------------------------------------------------------
+
+cmd="${1:-up}"
+[ "$#" -gt 0 ] && shift || true
+
+case "${cmd}" in
+    check)
+        preflight
+        ok "preflight passed."
+        ;;
+
+    build)
+        preflight
+        "${COMPOSE[@]}" build symphony "$@"
+        ;;
+
+    up|start)
+        preflight
+        ensure_dirs
+        info "starting stack..."
+        "${COMPOSE[@]}" up -d "$@"
+        queue_status
+        printf '\n  logs:  ./scripts/symphony logs\n  stop:  ./scripts/symphony stop\n\n'
+        ;;
+
+    logs)
+        "${COMPOSE[@]}" logs -f --tail=100 symphony "$@"
+        ;;
+
+    status)
+        queue_status
+        ;;
+
+    watch)
+        # No dashboard by design — the directories are the state, so this is
+        # just `ls` on a timer.
+        while true; do
+            clear
+            date
+            queue_status
+            sleep "${SYMPHONY_WATCH_INTERVAL:-5}"
+        done
+        ;;
+
+    add)
+        [ "$#" -ge 1 ] || { red 'usage: ./scripts/symphony add "what the agent should do" [--id ID] [--title TITLE]'; exit 1; }
+        body="$1"; shift
+        id=""; title=""
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --id)    id="$2"; shift 2 ;;
+                --title) title="$2"; shift 2 ;;
+                *) red "unknown option: $1"; exit 1 ;;
+            esac
+        done
+        ensure_dirs
+        [ -n "${id}" ] || id="SYM-$(date +%Y%m%d-%H%M%S)"
+        [ -n "${title}" ] || title="${body%%$'\n'*}"
+        # Keep the id inside what the tracker accepts (^[A-Za-z0-9][A-Za-z0-9._-]*$)
+        case "${id}" in
+            [A-Za-z0-9]*) : ;;
+            *) red "id must start with a letter or digit: ${id}"; exit 1 ;;
+        esac
+        slug="$(printf '%s' "${title}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-40 | sed 's/-$//')"
+        file="${QUEUE_PATH}/todo/${id}-${slug}.md"
+        [ -e "${file}" ] && { red "already exists: ${file}"; exit 1; }
+        now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        cat > "${file}" <<ITEM
+---
+id: ${id}
+title: ${title}
+priority: 5
+labels: []
+blocked_by: []
+branch: null
+attempts: 0
+next_retry_at: null
+session_id: null
+created_at: ${now}
+updated_at: ${now}
+---
+
+${body}
+ITEM
+        ok "queued ${file}"
+        ;;
+
+    stop)
+        "${COMPOSE[@]}" stop symphony
+        ok "symphony stopped. In-flight items stay in in-progress/ and resume on restart."
+        ;;
+
+    down)
+        "${COMPOSE[@]}" down "$@"
+        ;;
+
+    *)
+        red "unknown command: ${cmd}"
+        sed -n '2,14p' "$0" >&2
+        exit 1
+        ;;
+esac

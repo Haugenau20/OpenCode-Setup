@@ -194,8 +194,10 @@ while it is off. It runs agents without a human in the loop, so the setup is
 mostly about containment — chiefly a GitLab **group access token** scoped to a
 sandbox group, which is the only control here that holds server-side.
 
-Start with [`docs/SYMPHONY.md`](docs/SYMPHONY.md), including its staged rollout
-(stage 0 needs no remote access at all).
+Driven by `./scripts/symphony` (the counterpart to `./scripts/opencode`):
+`check` / `up` / `logs` / `status` / `add` / `stop`. Start with
+[`docs/SYMPHONY.md`](docs/SYMPHONY.md), including its staged rollout — stage 0
+needs no remote access at all.
 
 ## Architecture
 

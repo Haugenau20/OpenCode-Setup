@@ -314,10 +314,25 @@ with `max_concurrent_agents: 1` and `max_turns: 3`.
 
 ### 5. Up
 
+Use the launcher — it composes the right `-f` flags and refuses to start on a
+misconfiguration:
+
 ```
-docker compose -f docker-compose.yml -f docker-compose.symphony.yml up -d
-docker compose logs -f symphony
+./scripts/symphony check     # preflight only, changes nothing
+./scripts/symphony up        # start
+./scripts/symphony logs      # follow the orchestrator
 ```
+
+Other verbs: `status` (per-directory queue counts), `watch` (status on a timer),
+`add "..."` (queue an item without hand-writing front matter), `stop`, `down`,
+`build`.
+
+`check` is worth running on its own after any `.env` edit. It refuses outright
+on a missing `WORKFLOW.md`, a GitLab tracker with no token or no egress, or a
+workspaces mount pointing at your real repo — and warns on the quieter
+mistakes: one token used for both symphony and the agent, remote git on with no
+`GIT_REMOTE_ALLOWLIST`, writes enabled with no `GITLAB_WRITE_PROJECTS`, or more
+than one agent at a time before you have watched a full run.
 
 ## Rolling this out
 
@@ -346,7 +361,7 @@ role, protected branches. Never a personal PAT, at any stage.
 
 ## Operating it
 
-**Stop it.** `docker compose stop symphony` halts dispatch. In-flight items stay
+**Stop it.** `./scripts/symphony stop` halts dispatch. In-flight items stay
 in `in-progress/` and are recoverable — a restart re-dispatches them, because
 whatever is in `in-progress/` is by definition what was live when it died.
 
@@ -358,7 +373,7 @@ whatever is in `in-progress/` is by definition what was live when it died.
 **Accept work.** Review the MR, then move the item from `review/` to `done/`.
 Nothing else moves it out of `review/` — that is the point of the gate.
 
-**Audit.** `docker compose logs symphony` (structured JSON via pino), squid's
+**Audit.** `./scripts/symphony logs` (structured JSON via pino), squid's
 deny log, and GitLab's audit events attributed to the sandbox token. The
 workpad in each item file is the per-item history.
 

@@ -171,6 +171,20 @@ Symphony keys — every one defaults to today's behaviour)
   forever. Reuses the generic hook the launcher already uses for `--also`
   mounts, with the overlay playing the launcher's role.
 
+- **`scripts/symphony`**, the host-side launcher for the overlay and the
+  counterpart to `scripts/opencode`. Composes the right `-f` flags (including
+  the user-layer and symphony-dev overlays when those are configured) and adds
+  `check` / `up` / `logs` / `status` / `watch` / `add` / `stop` / `down` /
+  `build`.
+
+  Its preflight refuses to start on a missing `WORKFLOW.md`, a GitLab tracker
+  with no token or no egress, or a workspaces mount that is your real repo; and
+  warns on one token shared between symphony and the agent, remote git enabled
+  with no `GIT_REMOTE_ALLOWLIST`, writes enabled with no
+  `GITLAB_WRITE_PROJECTS`, and concurrency above one. `add` writes queue items
+  with front matter the tracker accepts, so there is nothing to hand-format. 16
+  bats cases.
+
 ### Notes
 - **Deleting pages is not implemented**, gate or no gate. Edits live in
   Confluence's version history and are one click from being undone; deletions
