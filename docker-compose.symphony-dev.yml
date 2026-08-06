@@ -2,7 +2,11 @@ name: opencode-${PROJECT_SLUG:-default}
 
 # Overlay on the overlay: develop symphony-queue itself.
 #
-#   docker compose -f docker-compose.yml \
+# Set SYMPHONY_SRC_PATH in symphony/.env and ./scripts/symphony adds this file
+# on its own; the equivalent by hand is:
+#
+#   docker compose --env-file .env --env-file symphony/.env \
+#                  -f docker-compose.yml \
 #                  -f docker-compose.symphony.yml \
 #                  -f docker-compose.symphony-dev.yml up -d
 #

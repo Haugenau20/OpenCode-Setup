@@ -277,6 +277,13 @@ Everything sensitive lives in `.env` on the host, mounted via Compose's
 `env_file`. The container itself never has secrets baked in. `.env` is
 gitignored; `.env.example` is the source of truth for the schema.
 
+`env_file` is all-or-nothing: the opencode service gets *every* key in `.env`,
+so that file is exactly "what the agent may read". Anything a different
+container needs and the agent must not see therefore cannot live there. The
+symphony overlay is the one case so far — its tracker token sits in
+`symphony/.env`, which only `./scripts/symphony` reads and no `env_file:`
+directive names. See [`SYMPHONY.md`](SYMPHONY.md).
+
 ## Telemetry
 
 We block phone-home in two layers:

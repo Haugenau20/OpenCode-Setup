@@ -16,10 +16,12 @@ setup() {
   cp "$REPO_ROOT"/docker-compose*.yml "$WORK/" 2>/dev/null || true
   cat > "$WORK/.env" <<EOF
 PROJECT_SLUG=test
+ALLOW_REMOTE_GIT=0
+EOF
+  cat > "$WORK/symphony/.env" <<EOF
 SYMPHONY_QUEUE_PATH=./q
 SYMPHONY_WORKSPACES_PATH=./ws
 SYMPHONY_CONFIG_PATH=./symphony
-ALLOW_REMOTE_GIT=0
 EOF
 }
 
@@ -49,8 +51,7 @@ use_gitlab()     { cp "$WORK/symphony/WORKFLOW.gitlab.md.example" "$WORK/symphon
 
 @test "reports the tracker kind it detected" {
   use_gitlab
-  echo "SYMPHONY_GITLAB_TOKEN=x" >> "$WORK/.env"
-  echo "SYMPHONY_HTTP_PROXY=http://squid:3128" >> "$WORK/.env"
+  echo "SYMPHONY_GITLAB_TOKEN=x" >> "$WORK/symphony/.env"
   run_launcher check
   [[ "$output" == *"tracker: gitlab"* ]]
 }
@@ -62,26 +63,61 @@ use_gitlab()     { cp "$WORK/symphony/WORKFLOW.gitlab.md.example" "$WORK/symphon
   [[ "$output" == *"SYMPHONY_GITLAB_TOKEN is empty"* ]]
 }
 
-@test "gitlab tracker without egress is fatal" {
+@test "gitlab tracker gets egress without anyone configuring it" {
+  # Squid's address is fixed by the compose service name, so this was a setting
+  # with one possible value and one other state: forgotten, run aborted.
   use_gitlab
-  echo "SYMPHONY_GITLAB_TOKEN=x" >> "$WORK/.env"
+  echo "SYMPHONY_GITLAB_TOKEN=x" >> "$WORK/symphony/.env"
   run_launcher check
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"SYMPHONY_HTTP_PROXY is empty"* ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"egress: http://squid:3128"* ]]
+}
+
+@test "file queue gets no egress" {
+  use_file_queue
+  run_launcher check
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"egress:"* ]]
 }
 
 @test "warns when symphony and the agent share one token" {
   # The two-token split is the whole containment story for the gitlab tracker;
   # one token for both silently collapses it back to a single privilege level.
   use_gitlab
-  cat >> "$WORK/.env" <<EOF
-SYMPHONY_GITLAB_TOKEN=same
-GITLAB_PAT=same
-SYMPHONY_HTTP_PROXY=http://squid:3128
-EOF
+  echo "SYMPHONY_GITLAB_TOKEN=same" >> "$WORK/symphony/.env"
+  echo "GITLAB_PAT=same" >> "$WORK/.env"
   run_launcher check
   [ "$status" -eq 0 ]
   [[ "$output" == *"are the same token"* ]]
+}
+
+@test "warns when a SYMPHONY_ key is left in the root .env" {
+  # The root .env is passed to the AGENT's container wholesale via `env_file:`,
+  # so a tracker token left there is a token the agent can read. It still works
+  # — the launcher loads both files — which is exactly why it needs saying.
+  use_gitlab
+  echo "SYMPHONY_GITLAB_TOKEN=stale" >> "$WORK/.env"
+  run_launcher check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SYMPHONY_* keys in the root .env"* ]]
+  [[ "$output" == *"handed to the agent's container"* ]]
+}
+
+@test "no warning when the root .env is clean" {
+  use_gitlab
+  echo "SYMPHONY_GITLAB_TOKEN=x" >> "$WORK/symphony/.env"
+  run_launcher check
+  [[ "$output" != *"keys in the root .env"* ]]
+}
+
+@test "an inline comment in symphony/.env is fatal" {
+  # Some .env readers keep the `# ...` as part of the value. doctor.sh catches
+  # this in the root file; nothing else reads this one.
+  use_file_queue
+  echo "SYMPHONY_LOG_LEVEL=debug # chatty" >> "$WORK/symphony/.env"
+  run_launcher check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"inline '#' comments"* ]]
 }
 
 @test "warns when remote git is on with no destination allowlist" {
@@ -106,11 +142,8 @@ EOF
 
 setup_both_planes() {
   use_gitlab
-  cat >> "$WORK/.env" <<EOF
-SYMPHONY_GITLAB_TOKEN=reporter
-SYMPHONY_HTTP_PROXY=http://squid:3128
-ALLOW_GITLAB_WRITE=1
-EOF
+  echo "SYMPHONY_GITLAB_TOKEN=reporter" >> "$WORK/symphony/.env"
+  echo "ALLOW_GITLAB_WRITE=1" >> "$WORK/.env"
   sed -i 's/^ALLOW_REMOTE_GIT=0/ALLOW_REMOTE_GIT=1/' "$WORK/.env"
   sed -i 's#^  base_url:.*#  base_url: https://gitlab.example#' "$WORK/symphony/WORKFLOW.md"
   sed -i 's#^  project_id:.*#  project_id: mygroup/myproject#'  "$WORK/symphony/WORKFLOW.md"
@@ -312,8 +345,7 @@ EOF
 
 @test "gitlab: status names the project instead of counting local files" {
   use_gitlab
-  echo "SYMPHONY_GITLAB_TOKEN=x" >> "$WORK/.env"
-  echo "SYMPHONY_HTTP_PROXY=http://squid:3128" >> "$WORK/.env"
+  echo "SYMPHONY_GITLAB_TOKEN=x" >> "$WORK/symphony/.env"
   sed -i 's#^  project_id:.*#  project_id: mygroup/myproject#' "$WORK/symphony/WORKFLOW.md"
   run_launcher status
   [[ "$output" == *"tracker: gitlab"* ]]
@@ -335,8 +367,7 @@ run_up() { run bash -c 'cd "$1" && DOCKER_HOST=unix:///nonexistent ./scripts/sym
 
 @test "gitlab: starting the stack creates workspaces but no local queue board" {
   use_gitlab
-  echo "SYMPHONY_GITLAB_TOKEN=x" >> "$WORK/.env"
-  echo "SYMPHONY_HTTP_PROXY=http://squid:3128" >> "$WORK/.env"
+  echo "SYMPHONY_GITLAB_TOKEN=x" >> "$WORK/symphony/.env"
   run_up
   [ -d "$WORK/ws" ]
   [ ! -d "$WORK/q/todo" ]

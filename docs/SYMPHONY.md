@@ -133,7 +133,7 @@ Then, all free and server-side, in the project or group settings:
 ### 2. Credential absence removes capability
 
 Each MCP server in this image auto-enables on credential presence. So the
-symphony stack gets its own `.env` with **only** the sandbox GitLab token — no
+symphony stack gets its own root `.env` with **only** the sandbox GitLab PAT — no
 `BITBUCKET_PAT`, no `JIRA_PAT`, no `CONFLUENCE_PAT`, no `JFROG_PAT`, no
 `MFILES_PAT`. Those servers are then never wired into `opencode.json` at all.
 Not disabled: absent.
@@ -168,11 +168,19 @@ create other group, project, or personal access tokens."*
 On `file_queue`, symphony has no egress, no credentials and no git remote at
 all. It talks to the opencode server and moves files.
 
-On `gitlab` it needs to reach the API, so it gets the Reporter token above and
-`SYMPHONY_HTTP_PROXY=http://squid:3128`. Both its networks are `internal: true`,
-so squid remains the only way out and the existing
-`squid/allowlist.d/30-gitlab.conf` entry is all it can reach. That is a real
-reduction from "holds nothing", and the Reporter role is the compensation.
+On `gitlab` it needs to reach the API, so it gets the Reporter token above and a
+route through squid — derived from `tracker.kind`, not a setting you fill in.
+Both its networks are `internal: true`, so squid remains the only way out and
+the existing `squid/allowlist.d/30-gitlab.conf` entry is all it can reach. That
+is a real reduction from "holds nothing", and the Reporter role is the
+compensation.
+
+Symphony's own settings live in `symphony/.env`, not the root `.env`. That is
+also containment, not filing: `docker-compose.yml` gives the opencode service
+`env_file: - .env`, so every key in the root file is an environment variable the
+**agent** can read — and the Reporter token has no business being in the
+agent's environment. `./scripts/symphony` reads both files and hands both to
+compose; the `env_file:` directive still names only the root one.
 
 Two things have to be true for that proxy to work at all, and both were missed
 the first time:
@@ -428,10 +436,18 @@ set of credentials.
 ```
 ./scripts/new-project.sh symphony ~/code/symphony-sandbox-repo
 cd ../OpenCode-Setup-symphony
-$EDITOR .env
+cp symphony/.env.example symphony/.env
+$EDITOR .env symphony/.env
 ```
 
-### 2. `.env`
+### 2. Two config files
+
+The root `.env` is the **agent's** stack — `docker-compose.yml` passes it into
+the opencode container wholesale. `symphony/.env` is the **orchestrator's**, and
+is read only by `./scripts/symphony`. Keeping the tracker token out of the first
+file is the point of the split; see "Symphony holds nothing" above.
+
+`.env` — the agent:
 
 ```
 PROJECT_SLUG=symphony
@@ -446,12 +462,6 @@ GITLAB_BASE_URL=https://gitlab.internal.example
 GITLAB_USER=<you>
 GITLAB_PAT=<project access token, Developer, api+write_repository>
 
-# Only for tracker.kind: gitlab — SYMPHONY's token. Reporter role: it can
-# read/write issues on this one project and cannot push code. A separate
-# token from GITLAB_PAT above, deliberately.
-SYMPHONY_GITLAB_TOKEN=<project access token, Reporter, api>
-SYMPHONY_HTTP_PROXY=http://squid:3128
-
 # Leave every other *_PAT blank.
 
 # Two gates, two planes: git (enforced by opencode/git-guard) and the API
@@ -461,12 +471,25 @@ ALLOW_REMOTE_GIT=1
 GIT_REMOTE_ALLOWLIST=gitlab.internal.example/my-group/my-project
 ALLOW_GITLAB_WRITE=1
 GITLAB_WRITE_PROJECTS=my-group/my-project
+```
 
-SYMPHONY_REF=v0.1.0
+`symphony/.env` — the orchestrator. Every key has a working default, so on the
+file queue you can skip this file entirely:
+
+```
+# Only for tracker.kind: gitlab — SYMPHONY's token. Reporter role: it can
+# read/write issues on this one project and cannot push code. A separate
+# token from GITLAB_PAT above, deliberately.
+SYMPHONY_GITLAB_TOKEN=<project access token, Reporter, api>
+
+SYMPHONY_REF=v0.4.0
 SYMPHONY_QUEUE_PATH=./symphony-queue
 SYMPHONY_WORKSPACES_PATH=./symphony-workspaces
 SYMPHONY_CONFIG_PATH=./symphony
 ```
+
+There is no proxy setting: `./scripts/symphony` routes symphony through squid
+when `tracker.kind` is `gitlab` and leaves it with no route off-host otherwise.
 
 ### 3. Trim the allowlist
 
@@ -517,10 +540,11 @@ Other verbs: `status` (per-directory queue counts), `watch` (status on a timer),
 `add "..."` (queue an item without hand-writing front matter), `stop`, `down`,
 `build`.
 
-`check` is worth running on its own after any `.env` edit. It refuses outright
-on a missing `WORKFLOW.md`, a GitLab tracker with no token or no egress, or a
+`check` is worth running on its own after editing either env file. It refuses
+outright on a missing `WORKFLOW.md`, a GitLab tracker with no token, or a
 workspaces mount pointing at your real repo — and warns on the quieter
-mistakes: one token used for both symphony and the agent, remote git on with no
+mistakes: a `SYMPHONY_*` key left in the root `.env` where the agent can read
+it, one token used for both symphony and the agent, remote git on with no
 `GIT_REMOTE_ALLOWLIST`, writes enabled with no `GITLAB_WRITE_PROJECTS`, or more
 than one agent at a time before you have watched a full run.
 
@@ -589,7 +613,6 @@ ALLOW_REMOTE_GIT=1
 GIT_REMOTE_ALLOWLIST=gitlab.example/mygroup/myproject
 ALLOW_GITLAB_WRITE=1
 GITLAB_WRITE_PROJECTS=mygroup/myproject
-SYMPHONY_HTTP_PROXY=http://squid:3128
 ```
 
 Both allowlists, both formats. `check` cross-checks them against each other and
@@ -655,15 +678,14 @@ workpad in each item file is the per-item history.
 
 ## Developing symphony-queue itself
 
-Add the dev overlay to bind-mount a host checkout over the baked-in build:
+Set `SYMPHONY_SRC_PATH` in `symphony/.env` and the launcher adds the dev overlay
+on its own, bind-mounting a host checkout over the baked-in build:
 
 ```
-export SYMPHONY_SRC_PATH=~/code/symphony-queue
-cd $SYMPHONY_SRC_PATH && npm ci && npm run build
+echo 'SYMPHONY_SRC_PATH=/home/you/code/symphony-queue' >> symphony/.env
+cd ~/code/symphony-queue && npm ci && npm run build
 cd -
-docker compose -f docker-compose.yml \
-               -f docker-compose.symphony.yml \
-               -f docker-compose.symphony-dev.yml up -d
+./scripts/symphony up
 ```
 
 Rebuild on the host after each change and restart the container. Turn it off

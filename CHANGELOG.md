@@ -31,8 +31,9 @@ up. The vocabulary:
 
 **Action required:** re-pull image + edit .env (new opt-in switches:
 `ALLOW_CONFLUENCE_WRITE`, `ALLOW_GITLAB_WRITE`, `GIT_REMOTE_ALLOWLIST`,
-`OPENCODE_INTERNAL_PORT`, plus the Symphony keys — every one defaults to
-today's behaviour)
+`OPENCODE_INTERNAL_PORT` — every one defaults to today's behaviour). Symphony
+users additionally: `cp symphony/.env.example symphony/.env` and move any
+`SYMPHONY_*` keys there out of the root `.env`, where the agent can read them.
 
 ### Added
 - **Writing to Confluence**, behind a new `ALLOW_CONFLUENCE_WRITE` gate in
@@ -197,6 +198,43 @@ today's behaviour)
   the server registers exactly the five read tools it always had.
 
 ### Changed
+- **Symphony's settings moved out of the root `.env` into `symphony/.env`**
+  (`symphony/.env.example` is the new template; the file is optional, since
+  every key has a working default). This is containment, not filing:
+  `docker-compose.yml` gives the opencode service `env_file: - .env`, which is
+  all-or-nothing, so every key in the root file was an environment variable the
+  **agent** could read — including `SYMPHONY_GITLAB_TOKEN`, the Reporter token
+  whose entire purpose is to be the one credential the agent does not hold.
+  `./scripts/symphony` loads both files and passes both to compose via
+  `--env-file`; the `env_file:` directive still names only the root one. A
+  `SYMPHONY_*` key left behind in `.env` still works, and `check` now warns
+  about it.
+- **`SYMPHONY_HTTP_PROXY` is gone as a setting.** Its only possible value was
+  `http://squid:3128` — a compose service name — and its only other state was
+  "you forgot it", which was a fatal preflight error. `./scripts/symphony` now
+  derives it from `tracker.kind` in `WORKFLOW.md`: squid when the tracker is
+  gitlab, nothing at all on the file queue, where symphony keeps its no-egress
+  posture. Setting it explicitly still wins, for a stack where squid is not the
+  way out.
+- **`SYMPHONY_REPO` is no longer a shipped knob** (constant unless you fork;
+  still overridable), and **`SYMPHONY_REF` is now pinned to `v0.4.0`** in both
+  the example file and the compose fallback. Both previously defaulted to
+  `main` — directly contradicting the comment above them saying never to use a
+  branch, because an image built from a moving branch is not reproducible.
+  `v0.4.0` is the current `main` commit, so nothing about the built image
+  changes. A new static test refuses a `SYMPHONY_REF` that is not a tag or SHA.
+- **`.env.example` trimmed from 274 lines to 154**, across every section, not
+  just symphony's. It had grown to 74% comments, several of them essays
+  duplicating material already in `docs/MCP_SERVERS.md`,
+  `docs/TROUBLESHOOTING.md` and `docs/SYMPHONY.md`. Every key survives — the
+  six credential blocks are now one section with the shared rules stated once,
+  and the rationale lives in the docs that own it. Two new static tests keep
+  the split honest: no `SYMPHONY_*` key may reappear in the root file, and
+  every key in `symphony/.env.example` must actually be read by the overlay or
+  the launcher.
+- `./scripts/symphony check` also rejects inline `# comments` in
+  `symphony/.env` — the same parser footgun `doctor.sh` catches in the root
+  file, which nothing else was looking at in the new one.
 - `opencode/manifest.json` gains `ALLOW_GITLAB_WRITE`, `GITLAB_WRITE_PROJECTS`,
   `GITLAB_QUEUE_LABEL_PREFIX` and the previously-missed `GIT_REMOTE_ALLOWLIST`.
 - The `gitlab-fetch` skill documents the issue tools, the write surface, the

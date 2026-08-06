@@ -37,6 +37,14 @@ load_env() {
 [ -f .env ] || { red "no .env found. Copy .env.example to .env and edit it first."; exit 1; }
 load_env ./.env
 
+# Symphony's own settings live beside its Dockerfile and WORKFLOW.md, not in the
+# root .env — docker-compose.yml hands that file to the AGENT's container
+# wholesale (`env_file: - .env`), so anything in it is readable by the agent,
+# and symphony's tracker token must not be. Optional: every key has a working
+# default, so the file queue runs without this file existing.
+SYMPHONY_ENV="./symphony/.env"
+[ -f "${SYMPHONY_ENV}" ] && load_env "${SYMPHONY_ENV}"
+
 PROJECT_SLUG="${PROJECT_SLUG:-default}"
 QUEUE_PATH="${SYMPHONY_QUEUE_PATH:-./symphony-queue}"
 WORKSPACES_PATH="${SYMPHONY_WORKSPACES_PATH:-./symphony-workspaces}"
@@ -44,11 +52,18 @@ CONFIG_PATH="${SYMPHONY_CONFIG_PATH:-./symphony}"
 WORKFLOW="${CONFIG_PATH}/WORKFLOW.md"
 SYMPHONY_CONTAINER="opencode-symphony-${PROJECT_SLUG}"
 
-COMPOSE=(docker compose -f docker-compose.yml)
+# Both files have to reach compose's interpolation, and passing --env-file at
+# all disables its default ./.env discovery — so the root file is named
+# explicitly too. This is only about ${VAR} substitution in the compose files;
+# the `env_file:` directive inside docker-compose.yml is a separate mechanism
+# with a literal path, which is what keeps SYMPHONY_* out of the agent.
+COMPOSE=(docker compose --env-file .env)
+[ -f "${SYMPHONY_ENV}" ] && COMPOSE+=(--env-file "${SYMPHONY_ENV}")
+COMPOSE+=(-f docker-compose.yml)
 [ -n "${USER_LAYER_PATH:-}" ] && COMPOSE+=(-f docker-compose.user-layer.yml)
 COMPOSE+=(-f docker-compose.symphony.yml)
 # Developing symphony-queue itself: bind-mount a host checkout over the baked
-# build. Opt in by setting SYMPHONY_SRC_PATH in .env.
+# build. Opt in by setting SYMPHONY_SRC_PATH in symphony/.env.
 if [ -n "${SYMPHONY_SRC_PATH:-}" ]; then
     COMPOSE+=(-f docker-compose.symphony-dev.yml)
 fi
@@ -73,6 +88,21 @@ wf_scalar() {
         | sed -n "s/^[[:space:]]*$1:[[:space:]]*\(.*\)\$/\1/p" | head -1 \
         | sed 's/[[:space:]]#.*$//; s/[[:space:]]*$//; s/^["'"'"']//; s/["'"'"']$//'
 }
+
+# --- egress ------------------------------------------------------------------
+# Symphony needs a route off-host for exactly one reason: the gitlab tracker
+# talks to the API. Both its networks are `internal: true`, so squid is the only
+# way out and the address is fixed by the compose service name — which made this
+# a setting whose sole possible value was `http://squid:3128` and whose only
+# other state was "you forgot it, run aborted". Derive it from the tracker
+# instead. On the file queue it stays empty and symphony has no egress at all.
+# An explicit SYMPHONY_HTTP_PROXY still wins, for a stack where squid is not the
+# way out.
+derive_egress() {
+    [ "$(tracker_kind)" = "gitlab" ] || return 0
+    export SYMPHONY_HTTP_PROXY="${SYMPHONY_HTTP_PROXY:-http://squid:3128}"
+}
+derive_egress
 
 # --- allowlist agreement ------------------------------------------------------
 # GIT_REMOTE_ALLOWLIST (git plane, enforced by opencode/git-guard) and
@@ -185,8 +215,30 @@ allowlist_agreement() {
 }
 
 preflight() {
-    local fatal=0 kind
+    local fatal=0 kind stale
     info "preflight (project: ${PROJECT_SLUG})"
+
+    # SYMPHONY_* used to live in the root .env. They still work from there — the
+    # launcher loads both — but docker-compose.yml passes that whole file into
+    # the AGENT's container, so a tracker token left behind is a token the agent
+    # can read. Nothing else warns about this, because nothing else sees both
+    # files.
+    if stale="$(grep -oE '^SYMPHONY_[A-Z_]+' .env | tr '\n' ' ')" && [ -n "${stale}" ]; then
+        warn "  ! SYMPHONY_* keys in the root .env: ${stale}"
+        warn "    move them to ${SYMPHONY_ENV} — the root .env is handed to the agent's container"
+    fi
+
+    # Same parser footgun the root .env carries, and the same fix: some .env
+    # readers keep an inline `# comment` as part of the value. doctor.sh checks
+    # the root file; nothing else looks at this one.
+    if [ -f "${SYMPHONY_ENV}" ]; then
+        local inline
+        if inline="$(grep -nE '^[A-Za-z_][A-Za-z0-9_]*=[^#]*[[:space:]]#' "${SYMPHONY_ENV}")"; then
+            red "  ✗ inline '#' comments in ${SYMPHONY_ENV} — move them to their own lines:"
+            printf '      %s\n' "${inline}" >&2
+            fatal=1
+        fi
+    fi
 
     if [ ! -f "${WORKFLOW}" ]; then
         red "  ✗ no ${WORKFLOW}"
@@ -213,12 +265,14 @@ preflight() {
 
     case "${kind}" in
         gitlab)
-            [ -n "${SYMPHONY_GITLAB_TOKEN:-}" ] \
-                && ok "  ✓ SYMPHONY_GITLAB_TOKEN set (should be a Reporter project token)" \
-                || { red "  ✗ tracker is gitlab but SYMPHONY_GITLAB_TOKEN is empty"; fatal=1; }
-            [ -n "${SYMPHONY_HTTP_PROXY:-}" ] \
-                && ok "  ✓ SYMPHONY_HTTP_PROXY set (symphony reaches GitLab via squid)" \
-                || { red "  ✗ tracker is gitlab but SYMPHONY_HTTP_PROXY is empty — symphony has no egress"; fatal=1; }
+            if [ -n "${SYMPHONY_GITLAB_TOKEN:-}" ]; then
+                ok "  ✓ SYMPHONY_GITLAB_TOKEN set (should be a Reporter project token)"
+            else
+                red "  ✗ tracker is gitlab but SYMPHONY_GITLAB_TOKEN is empty"
+                red "    set it in ${SYMPHONY_ENV} (cp symphony/.env.example symphony/.env)"
+                fatal=1
+            fi
+            ok "  ✓ egress: ${SYMPHONY_HTTP_PROXY} (symphony reaches GitLab via squid)"
             if [ "${SYMPHONY_GITLAB_TOKEN:-}" = "${GITLAB_PAT:-}" ] && [ -n "${GITLAB_PAT:-}" ]; then
                 warn "  ! SYMPHONY_GITLAB_TOKEN and GITLAB_PAT are the same token"
                 warn "    the split only means anything if symphony's is Reporter and the agent's is Developer"

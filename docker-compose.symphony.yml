@@ -2,7 +2,13 @@ name: opencode-${PROJECT_SLUG:-default}
 
 # Overlay: the opt-in autonomous orchestrator.
 #
-#   docker compose -f docker-compose.yml -f docker-compose.symphony.yml up -d
+# Bring it up with ./scripts/symphony, not raw compose: symphony's settings live
+# in symphony/.env (kept out of the root .env, which docker-compose.yml hands to
+# the agent's container wholesale), and the launcher is what puts both files in
+# front of compose:
+#
+#   docker compose --env-file .env --env-file symphony/.env \
+#                  -f docker-compose.yml -f docker-compose.symphony.yml up -d
 #
 # Nothing in the base stack changes when this file is absent, which is the
 # point: symphony is a different way of working, not a new default. Read
@@ -16,7 +22,11 @@ services:
       context: .
       dockerfile: symphony/Dockerfile
       args:
-        SYMPHONY_REF: ${SYMPHONY_REF:-main}
+        # Defaults are a PIN, not a floating branch — an image built from `main`
+        # is not reproducible. Override SYMPHONY_REF in symphony/.env to move.
+        SYMPHONY_REF: ${SYMPHONY_REF:-v0.4.0}
+        # A constant unless you fork; overridable, but not worth a line in the
+        # example file.
         SYMPHONY_REPO: ${SYMPHONY_REPO:-https://github.com/Haugenau20/symphony-queue.git}
     container_name: opencode-symphony-${PROJECT_SLUG:-default}
     hostname: symphony
@@ -43,8 +53,10 @@ services:
       # Developer token lives in the opencode container and never comes here.
       # Neither can do the other's job. docs/SYMPHONY.md §two tokens.
       SYMPHONY_GITLAB_TOKEN: ${SYMPHONY_GITLAB_TOKEN:-}
-      # Egress for the GitLab tracker only. With tracker.kind: file_queue these
-      # are unused and the container has no route off-host at all.
+      # Egress for the GitLab tracker only, and not a value you set by hand:
+      # ./scripts/symphony derives it from tracker.kind in WORKFLOW.md. With
+      # tracker.kind: file_queue it stays empty and the container has no route
+      # off-host at all.
       HTTP_PROXY: ${SYMPHONY_HTTP_PROXY:-}
       HTTPS_PROXY: ${SYMPHONY_HTTP_PROXY:-}
       http_proxy: ${SYMPHONY_HTTP_PROXY:-}

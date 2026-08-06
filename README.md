@@ -195,7 +195,9 @@ mostly about containment — chiefly a GitLab **group access token** scoped to a
 sandbox group, which is the only control here that holds server-side.
 
 Driven by `./scripts/symphony` (the counterpart to `./scripts/opencode`):
-`check` / `up` / `logs` / `status` / `add` / `stop`. Start with
+`check` / `up` / `logs` / `status` / `add` / `stop`. Its settings live in
+`symphony/.env` — deliberately not the root `.env`, which is handed to the
+agent's container wholesale. Start with
 [`docs/SYMPHONY.md`](docs/SYMPHONY.md), including its staged rollout — stage 0
 needs no remote access at all.
 

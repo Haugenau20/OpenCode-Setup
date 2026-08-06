@@ -188,6 +188,56 @@ shell_files() {
   done
 }
 
+# --- .env.example <-> symphony/.env.example split ----------------------------
+#
+# docker-compose.yml gives the opencode service `env_file: - .env`, so every key
+# in the root .env is an environment variable the AGENT can read. Symphony's
+# tracker token must not be one of them. The split is only worth anything if it
+# stays split, and adding a key back is a one-line edit nobody would flag.
+
+@test ".env.example: no SYMPHONY_ key is in the root file" {
+  local found
+  found="$(grep -E '^SYMPHONY_[A-Z_]+=' "$REPO_ROOT/.env.example" || true)"
+  [ -z "$found" ] || {
+    echo "SYMPHONY_ keys belong in symphony/.env.example — the root .env is passed" >&2
+    echo "into the agent's container via env_file. Found:" >&2
+    printf '  %s\n' "$found" >&2
+    return 1
+  }
+}
+
+@test "symphony/.env.example: every key it ships is read by the overlay or the launcher" {
+  local key unused=""
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    grep -qF "$key" "$REPO_ROOT/docker-compose.symphony.yml" \
+      || grep -qF "$key" "$REPO_ROOT/docker-compose.symphony-dev.yml" \
+      || grep -qF "$key" "$REPO_ROOT/scripts/symphony" \
+      || unused="${unused}${key} "
+  done < <(grep -oE '^SYMPHONY_[A-Z_]+' "$REPO_ROOT/symphony/.env.example")
+  [ -z "$unused" ] || {
+    echo "keys in symphony/.env.example that nothing reads: $unused" >&2
+    return 1
+  }
+}
+
+@test "symphony image ref is pinned, not a branch" {
+  # A build from a moving branch is not reproducible, which is the whole reason
+  # the arg exists. Both the shipped value and the compose fallback must be a
+  # tag or a full SHA.
+  local shipped fallback
+  shipped="$(grep -E '^SYMPHONY_REF=' "$REPO_ROOT/symphony/.env.example" | cut -d= -f2)"
+  fallback="$(grep -oE 'SYMPHONY_REF:-[^}]*' "$REPO_ROOT/docker-compose.symphony.yml" | cut -d- -f2-)"
+  for ref in "$shipped" "$fallback"; do
+    [ -n "$ref" ] || { echo "no SYMPHONY_REF found" >&2; return 1; }
+    case "$ref" in
+      v[0-9]*) ;;
+      [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;;
+      *) echo "SYMPHONY_REF '$ref' is not a tag or a SHA" >&2; return 1 ;;
+    esac
+  done
+}
+
 # --- JSON files parse ----------------------------------------------------------
 
 @test "every tracked *.json file is valid JSON" {

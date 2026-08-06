@@ -17,6 +17,8 @@ patches-symphony-queue/
 # Symphony: the work queue and the per-item agent workspaces are local state.
 # Track the queue deliberately if you want its history; it is ignored by
 # default so a scratch queue never lands in a commit.
+# (symphony/.env holds the tracker token and is already covered by the `.env`
+# rule at the top, which matches at any depth.)
 symphony-queue/
 symphony-workspaces/
 symphony/WORKFLOW.md
