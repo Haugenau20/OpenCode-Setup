@@ -254,6 +254,17 @@ today's behaviour)
   created either way — the agent gets one per item whichever tracker produced
   it. 6 more bats cases (182 total).
 
+- **The GitLab workflow example now sets `agent.completion_marker`**
+  (`SYMPHONY_DONE`) and instructs the agent to emit it. Until an agent could say
+  "I am finished", the turn loop had no exit but exhaustion: its only early-stop
+  test was whether the item had left its active states, and symphony owns that
+  label and does not move it until the run is over, so the answer was always
+  "still active". An agent that finished at turn 3 of 10 was told "the work is
+  not finished, resume" seven more times while holding a live credential and a
+  pushed branch — and the cheapest ways to fill an empty turn are amending
+  commits, force-pushing, or opening a second MR. Raising `max_turns` made this
+  worse rather than better. `max_turns` is a ceiling, not a budget. (Requires a
+  `SYMPHONY_REF` carrying the upstream change; older builds ignore the key.)
 - **The GitLab workflow example now sets `agent.continuation_guidance`** and
   documents what `max_turns` actually buys. Turn 1 is the task prompt and turns
   2..N are continuations; when they run out the run ends and the item goes to

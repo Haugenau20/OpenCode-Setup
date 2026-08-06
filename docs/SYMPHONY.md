@@ -325,6 +325,41 @@ and 30 minutes is generous rather than tight. Check the log: a
 `stall_detected` line carrying `sawActivity: false` means the event stream
 never connected and the timeout has quietly gone back to being a run timeout.
 
+## What a turn is
+
+**One session, many prompts — not one agent per turn.** Symphony creates a
+single OpenCode session per item and prompts it repeatedly:
+
+| | |
+|---|---|
+| Turn 1 | the rendered `WORKFLOW.md` prompt body |
+| Turns 2…`max_turns` | `agent.continuation_guidance`, into the *same* session |
+
+The conversation accumulates, so turn 7 still has turns 1–6 in context.
+`max_turns: 10` is ten sequential prompts to one agent, not ten agents.
+
+**And the loop had no exit but exhaustion.** Its only early-stop test was "has
+the item left its active states?" — but symphony owns that label and does not
+move it until the run is over, and the agent is forbidden from relabelling its
+own issue. So the answer was always "still active", every time.
+
+An agent that finished at turn 3 of 10 got seven more "the work is not
+finished, resume, focus on the remaining work" prompts, holding a live
+credential and a pushed branch. The cheapest ways to fill an empty turn are
+amending commits, force-pushing, opening a second merge request, or rewriting
+work that was already correct — so raising `max_turns` made this worse, not
+better.
+
+`agent.completion_marker` (default `SYMPHONY_DONE`) is the fix: the agent emits
+it on a line of its own and the run ends there. Whole-line, not substring —
+agents narrate their own instructions, and "I'll reply with SYMPHONY_DONE once
+the MR is open" must not be read as the declaration itself. Your workflow prompt
+has to *tell* the agent to emit it; the GitLab example does, in rule 10 and in
+the continuation guidance.
+
+Treat `max_turns` as a **ceiling, not a budget**. With a working marker a
+generous ceiling costs nothing on a run that finishes early.
+
 ## `review` means the agent stopped, not that it finished
 
 Symphony moves an item to `review` on a **clean exit** — the agent's turn loop
@@ -333,21 +368,30 @@ item can arrive in `symphony::review` with no merge request, no branch, and no
 work at all, and nothing in symphony's log will say so: you will see
 `turnsCompleted: N` against your `max_turns: N` and `state_transitioned_on_exit`.
 
-That equality is the tell. `turnsCompleted` reaching `max_turns` means the agent
-never decided it was done — it was interrupted. A run that genuinely finished
-stops early, and logs `issue_no_longer_active` or a lower `turnsCompleted`.
+The log now says which happened outright. `agent_run_completed` carries a
+`stopReason`:
 
-Two levers, and the second matters more than it looks:
+| `stopReason` | what it means |
+|---|---|
+| `completed` | the agent emitted the completion marker. It thinks it is done. |
+| `max_turns` | **interrupted** mid-task. Also logs `agent_run_hit_max_turns` at warn. |
+| `issue_inactive` | a human moved the label to a terminal state mid-run. |
 
-- **`max_turns`.** Turn 1 is the task prompt; turns 2..N are continuations.
-  Clone, implement, commit, push and open an MR does not fit in 3 for a
-  non-frontier model. 8–12 once a run has worked end to end.
+`max_turns` with no merge request is the case worth chasing. On an older
+`SYMPHONY_REF` there is no `stopReason`, and the tell is `turnsCompleted`
+reaching `max_turns` exactly.
+
+Three levers, in the order they matter:
+
+- **`agent.completion_marker`.** Without it the run *always* uses every turn —
+  see above. This is the one that makes the other two safe.
 - **`agent.continuation_guidance`.** The nudge sent at the start of every turn
   after the first. The built-in default is tracker-neutral and cannot name your
   finishing step, so name it — the GitLab example spends most of its text on
   "you are not done until the MR exists" and on what to do with one turn left.
-  It is the cheapest correction available for a model that polishes until the
-  turns run out.
+- **`max_turns`.** A ceiling. Clone, implement, commit, push and open an MR does
+  not fit in 3 for a non-frontier model; 8–12 is right once a run has worked
+  end to end, and with a working marker a generous ceiling costs nothing.
 
 When an MR does not appear, symphony's log cannot tell you why; it only knows
 the agent stopped. The evidence is in three places: the workspace on the host

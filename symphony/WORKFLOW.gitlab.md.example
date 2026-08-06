@@ -46,13 +46,20 @@ hooks:
 
 agent:
   max_concurrent_agents: 1
-  # Turn 1 is the task prompt; turns 2..max_turns are continuations. When they
-  # run out the run ends and the issue goes to symphony::review WHETHER OR NOT
-  # anything was produced — running out of turns is a clean exit, not a failure.
-  # 3 is a first-run number. Clone, implement, commit, push and open an MR does
-  # not fit in 3 for a non-frontier model: raise it to 8-12 once a run has
-  # worked end to end.
+  # A CEILING, not a target. Turn 1 is the task prompt; turns 2..max_turns are
+  # continuations, all in ONE session — not one agent per turn. The run ends
+  # early when the agent emits completion_marker below, so a higher ceiling
+  # costs nothing on a run that finishes. Without that marker the loop has no
+  # exit but exhaustion, because symphony owns the issue's label and does not
+  # move it until the run is over: the "is it still active?" test is true every
+  # time. 3 is a first-run number; 8-12 is right once a run has worked.
   max_turns: 3
+  # How the agent ends the run. It must appear on a line of its own. Without it
+  # an agent that finished at turn 3 of 10 gets seven more "keep going" prompts
+  # while holding a live credential and a pushed branch — and the cheapest ways
+  # to fill an empty turn are amending commits, force-pushing, or opening a
+  # second MR. Set to "" to disable and always use every turn.
+  completion_marker: SYMPHONY_DONE
   # Sent at the start of every turn after the first. The built-in default is
   # tracker-neutral and cannot name the finishing step, so name it here — this
   # is the lever that stops a model polishing until the turns run out.
@@ -69,6 +76,10 @@ agent:
       MR, and put anything unfinished in the MR description under Blockers.
     - Update your workpad comment on the issue after each milestone, not on
       every edit.
+    - When the MR is open and you have nothing further to do, end your reply
+      with SYMPHONY_DONE on a line by itself. That ends the run. Do not keep
+      going for the sake of the remaining turns, and do not amend, force-push
+      or open a second MR to fill one.
   max_retry_backoff_ms: 300000
 
 opencode:
@@ -208,6 +219,11 @@ without a workpad rather than looking for another route.
    try to label it into the queue yourself.
 9. **Your final message is a report**, not a handoff: what you did, what you
    verified, what is blocked. No "next steps for the user".
+10. **Say when you are finished.** When the merge request is open — or you have
+    hit a true blocker and stopped — end your reply with `SYMPHONY_DONE` on a
+    line by itself. That ends the run immediately. Turns are a ceiling, not a
+    budget to spend: there is no credit for using them, and an agent that keeps
+    editing after the MR is open only makes the reviewer's job harder.
 
 ## Merge request description
 
