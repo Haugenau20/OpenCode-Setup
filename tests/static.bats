@@ -316,3 +316,57 @@ shell_files() {
   grep -q 'OPENCODE_EXTRA_ALLOWED_DIRS: /workspaces/\*\*' "$overlay"
   grep -q ':/workspaces:z' "$overlay"
 }
+
+# --- the per-project compose contract ----------------------------------------
+# These three variables ARE the multi-project interface. scripts/opencode and
+# scripts/symphony are one implementation of it; opencode-launcher is the
+# user-facing one and has to set the same things. Documented in
+# docs/MULTI_PROJECT.md — if a name changes here, it changes there too.
+
+@test "docker-compose.yml layers a per-project env file over the root .env" {
+  # Without this the container gets the shared .env only, and per-project
+  # credentials — the whole reason a project has its own file — never arrive.
+  grep -q 'PROJECT_ENV_FILE' "$REPO_ROOT/docker-compose.yml"
+  # required:false keeps the single-project case working with no such file.
+  grep -qE 'required:[[:space:]]*false' "$REPO_ROOT/docker-compose.yml"
+}
+
+@test "the per-project env layer comes AFTER the root .env" {
+  # env_file is last-wins, so the order is the whole mechanism. Reversed, the
+  # shared file would override every project.
+  # The `path:` entry, not the comment above it that also names the variable.
+  root_line="$(grep -n '^      - \.env$' "$REPO_ROOT/docker-compose.yml" | head -1 | cut -d: -f1)"
+  proj_line="$(grep -n '^      - path: \${PROJECT_ENV_FILE' "$REPO_ROOT/docker-compose.yml" | head -1 | cut -d: -f1)"
+  [ -n "$root_line" ] && [ -n "$proj_line" ]
+  [ "$root_line" -lt "$proj_line" ]
+}
+
+@test "the squid allowlist directory is overridable per project" {
+  # docs/SYMPHONY.md §3 tells a symphony stack to trim its egress surface. That
+  # is not expressible while every stack shares one directory.
+  grep -q 'EXTRA_ALLOWLIST_PATH' "$REPO_ROOT/docker-compose.yml"
+}
+
+@test "no env_file directive names symphony's settings" {
+  # The agent/launcher split: symphony's tracker token must never be in a file
+  # handed to the agent's container. Only .env and PROJECT_ENV_FILE may appear.
+  bad="$(grep -nE '^\s+-\s+.*symphony.*\.env' "$REPO_ROOT/docker-compose.yml" || true)"
+  if [ -n "$bad" ]; then
+    echo "docker-compose.yml names a symphony env file in env_file: $bad" >&2
+    return 1
+  fi
+}
+
+@test "both launchers set PROJECT_ENV_FILE when a project is selected" {
+  for f in "$REPO_ROOT/scripts/opencode" "$REPO_ROOT/scripts/symphony"; do
+    grep -q 'PROJECT_ENV_FILE' "$f" || { echo "$f never sets PROJECT_ENV_FILE" >&2; return 1; }
+  done
+}
+
+@test "both launchers pass -p so two stacks are separate to compose" {
+  # Container names are slug-suffixed already, but without a compose project
+  # name `up` on one stack treats the other's containers as orphans.
+  for f in "$REPO_ROOT/scripts/opencode" "$REPO_ROOT/scripts/symphony"; do
+    grep -qE '\-p "opencode-\$\{PROJECT_SLUG' "$f" || { echo "$f does not pass -p" >&2; return 1; }
+  done
+}

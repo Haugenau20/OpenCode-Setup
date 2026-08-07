@@ -99,7 +99,9 @@ use_gitlab()     { cp "$WORK/symphony/WORKFLOW.gitlab.md.example" "$WORK/symphon
   echo "SYMPHONY_GITLAB_TOKEN=stale" >> "$WORK/.env"
   run_launcher check
   [ "$status" -eq 0 ]
-  [[ "$output" == *"SYMPHONY_* keys in the root .env"* ]]
+  # The message names the file, because there are now two agent-visible layers
+  # it can report on: the root .env and projects/<slug>/.env.
+  [[ "$output" == *"SYMPHONY_* keys in .env"* ]]
   [[ "$output" == *"handed to the agent's container"* ]]
 }
 
@@ -407,4 +409,171 @@ run_up() { run bash -c 'cd "$1" && DOCKER_HOST=unix:///nonexistent ./scripts/sym
   run_launcher frobnicate
   [ "$status" -eq 1 ]
   [[ "$output" == *"unknown command"* ]]
+}
+
+# --- multi-project ------------------------------------------------------------
+# One checkout runs many stacks. A project is a directory under projects/ holding
+# what differs between them; the root .env and symphony/.env keep what they
+# share. The failure this section mostly exists to prevent is silent aliasing —
+# two projects resolving onto one queue, one port or one token, which does not
+# announce itself and is exactly what the rename(2) claim assumes cannot happen.
+
+new_project() {
+  run bash -c 'cd "$1" && shift && ./scripts/new-project.sh "$@"' _ "$WORK" "$@"
+}
+
+# A project ready for the file queue: scaffolded, with a WORKFLOW.md in place.
+scaffold() {
+  cp "$REPO_ROOT/scripts/new-project.sh" "$WORK/scripts/new-project.sh"
+  chmod +x "$WORK/scripts/new-project.sh"
+  new_project "$1" "/tmp/repo-$1"
+  [ "$status" -eq 0 ]
+  cp "$WORK/symphony/WORKFLOW.md.example" "$WORK/projects/$1/config/WORKFLOW.md"
+}
+
+@test "no -p behaves exactly as before" {
+  use_file_queue
+  run_launcher check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"preflight (project: test)"* ]]
+  [[ "$output" != *"from ./projects"* ]]
+}
+
+@test "-p names a project that does not exist and says how to create it" {
+  use_file_queue
+  run_launcher -p ghost check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no such project"* ]]
+  [[ "$output" == *"new-project.sh ghost"* ]]
+}
+
+@test "a slug that would escape projects/ is refused" {
+  # The slug is a path component before it is anything else.
+  use_file_queue
+  run_launcher -p ../../etc check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"invalid project slug"* ]]
+}
+
+@test "the per-project queue wins over a path set in the shared symphony/.env" {
+  # symphony/.env ships ./symphony-queue. Inheriting it would put every project
+  # on ONE queue, and two orchestrators claiming the same item is precisely what
+  # the atomic-claim argument assumes cannot happen. The derivation therefore
+  # outranks the shared layer — while still losing to the project's own file.
+  scaffold alpha
+  run_launcher -p alpha status
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"projects/alpha/queue"* ]]
+  [[ "$output" != *"  queue: ./q"* ]]
+}
+
+@test "a project's own symphony.env still outranks the derived path" {
+  scaffold alpha
+  echo "SYMPHONY_QUEUE_PATH=./elsewhere" >> "$WORK/projects/alpha/symphony.env"
+  run_launcher -p alpha status
+  [[ "$output" == *"queue: ./elsewhere"* ]]
+}
+
+@test "two projects get different ports" {
+  scaffold alpha
+  scaffold beta
+  a="$(grep '^OPENCODE_PORT=' "$WORK/projects/alpha/.env" | cut -d= -f2)"
+  b="$(grep '^OPENCODE_PORT=' "$WORK/projects/beta/.env" | cut -d= -f2)"
+  [ -n "$a" ] && [ -n "$b" ]
+  [ "$a" != "$b" ]
+}
+
+@test "a project's .env layers over the root .env" {
+  use_file_queue
+  scaffold alpha
+  echo "ALLOW_REMOTE_GIT=1" >> "$WORK/projects/alpha/.env"
+  run_launcher -p alpha check
+  # Root .env says 0; the project says 1 and wins.
+  [[ "$output" == *"remote git is ON"* ]]
+  run_launcher check
+  [[ "$output" == *"remote git OFF"* ]]
+}
+
+@test "an agent env file inside the mounted config directory is fatal" {
+  # /config belongs to symphony, which is supposed to hold the Reporter token
+  # and nothing else. The agent's Developer token readable from in there undoes
+  # the two-token split.
+  scaffold alpha
+  echo "SYMPHONY_CONFIG_PATH=./projects/alpha" >> "$WORK/projects/alpha/symphony.env"
+  cp "$WORK/projects/alpha/config/WORKFLOW.md" "$WORK/projects/alpha/WORKFLOW.md"
+  run_launcher -p alpha check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"mounted into the symphony container"* ]]
+}
+
+@test "symphony/.env in the default config directory is NOT flagged" {
+  # It is symphony's own token in symphony's own container — no boundary is
+  # crossed, and the shipped single-project layout puts it there.
+  use_file_queue
+  run_launcher check
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"mounted into the symphony container"* ]]
+}
+
+@test "a SYMPHONY_ key in a project's .env is warned about" {
+  # Same reason as the root .env: that file is handed to the agent's container.
+  scaffold alpha
+  echo "SYMPHONY_GITLAB_TOKEN=leaked" >> "$WORK/projects/alpha/.env"
+  run_launcher -p alpha check
+  [[ "$output" == *"SYMPHONY_* keys in ./projects/alpha/.env"* ]]
+  [[ "$output" == *"handed to the agent's container"* ]]
+}
+
+@test "a tracker token inherited from the shared file is warned about" {
+  # A project access token reaches ONE project. Shared between two stacks it
+  # either 404s or, if it is really a group token, over-grants the second.
+  scaffold alpha
+  cp "$WORK/symphony/WORKFLOW.gitlab.md.example" "$WORK/projects/alpha/config/WORKFLOW.md"
+  echo "SYMPHONY_GITLAB_TOKEN=shared" >> "$WORK/symphony/.env"
+  run_launcher -p alpha check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"comes from the shared"* ]]
+  [[ "$output" == *"projects/alpha/symphony.env"* ]]
+}
+
+@test "a project with its own tracker token is not warned about" {
+  scaffold alpha
+  cp "$WORK/symphony/WORKFLOW.gitlab.md.example" "$WORK/projects/alpha/config/WORKFLOW.md"
+  echo "SYMPHONY_GITLAB_TOKEN=shared" >> "$WORK/symphony/.env"
+  echo "SYMPHONY_GITLAB_TOKEN=mine" >> "$WORK/projects/alpha/symphony.env"
+  run_launcher -p alpha check
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"comes from the shared"* ]]
+}
+
+@test "projects lists what exists, and says so when nothing does" {
+  use_file_queue
+  run_launcher projects
+  [[ "$output" == *"no projects yet"* ]]
+  scaffold alpha
+  run_launcher projects
+  [[ "$output" == *"alpha"* ]]
+}
+
+@test "scaffolding refuses to overwrite an existing project" {
+  scaffold alpha
+  new_project alpha
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"already exists"* ]]
+}
+
+@test "a scaffolded project keeps the agent's and symphony's files apart" {
+  # The split is the reason the tracker token never reaches the agent: only
+  # .env is named by an `env_file:` directive, and it is not the file the token
+  # is in.
+  scaffold alpha
+  [ -f "$WORK/projects/alpha/.env" ]
+  [ -f "$WORK/projects/alpha/symphony.env" ]
+  # Commented out, not blank: absent means "inherit", and an empty value would
+  # override a shared group token with nothing.
+  grep -q '^#SYMPHONY_GITLAB_TOKEN=' "$WORK/projects/alpha/symphony.env"
+  ! grep -qE '^SYMPHONY_GITLAB_TOKEN=' "$WORK/projects/alpha/symphony.env"
+  ! grep -q '^SYMPHONY_' "$WORK/projects/alpha/.env"
+  # config/ holds WORKFLOW.md and nothing that could carry a credential.
+  [ -z "$(find "$WORK/projects/alpha/config" -maxdepth 1 -name '*.env' -o -maxdepth 1 -name '.env')" ]
 }

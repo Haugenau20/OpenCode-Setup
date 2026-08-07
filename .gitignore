@@ -23,6 +23,16 @@ symphony-queue/
 symphony-workspaces/
 symphony/WORKFLOW.md
 
+# Per-project stacks (scripts/new-project.sh). Everything under projects/ is
+# local state: scoped credentials, the project's WORKFLOW.md, its queue and its
+# disposable workspaces. The directory itself is tracked so the layout is
+# discoverable in a fresh clone.
+#   projects/<slug>/.env         — already covered by the `.env` rule above
+#   projects/<slug>/symphony.env — is not, hence the explicit rule
+projects/*
+!projects/.gitkeep
+!projects/README.md
+
 # Local per-developer extras
 user-layer/
 extra-allowlist.d/*.conf

@@ -13,6 +13,17 @@
 #   ./scripts/symphony down        # stop the whole stack
 #   ./scripts/symphony build       # rebuild the symphony image
 #   ./scripts/symphony check       # preflight only, change nothing
+#   ./scripts/symphony projects    # list the projects in this checkout
+#   ./scripts/symphony config      # the fully resolved compose config
+#
+# Every verb takes `-p <slug>` (or SYMPHONY_PROJECT=<slug>) to select one of the
+# stacks under projects/. Without it the root .env and symphony/.env are the
+# whole configuration — the single-project setup, unchanged.
+#
+#   ./scripts/symphony -p acme-api up
+#
+# New projects come from ./scripts/new-project.sh. Layout and the layering
+# rules: projects/README.md.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -34,16 +45,90 @@ load_env() {
     done < "${file}"
 }
 
+# --- project selection -------------------------------------------------------
+# Leading options only, so a verb's own arguments are never mistaken for one —
+# `add "-p is a weird thing to write"` still queues that text.
+PROJECT="${SYMPHONY_PROJECT:-}"
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -p|--project)
+            [ "$#" -ge 2 ] || { red "-p needs a project slug"; exit 1; }
+            PROJECT="$2"; shift 2 ;;
+        -p=*|--project=*)
+            PROJECT="${1#*=}"; shift ;;
+        *) break ;;
+    esac
+done
+
+# The slug becomes a path component and a compose project name, so it is
+# validated before either use — the same character class the tracker accepts for
+# an item id, which also rules out `..` and anything with a slash in it.
+if [ -n "${PROJECT}" ]; then
+    case "${PROJECT}" in
+        *[!A-Za-z0-9._-]*|.*|-*|"")
+            red "invalid project slug: ${PROJECT}"
+            red "  letters, digits, dot, underscore and dash; must start with a letter or digit"
+            exit 1 ;;
+    esac
+    PROJECT_DIR="./projects/${PROJECT}"
+    [ -d "${PROJECT_DIR}" ] || {
+        red "no such project: ${PROJECT_DIR}"
+        red "  create it:  ./scripts/new-project.sh ${PROJECT}"
+        red "  list them:  ./scripts/symphony projects"
+        exit 1
+    }
+fi
+
+# --- configuration layers -----------------------------------------------------
+# Four files, read in this order, last value winning:
+#
+#   .env                            shared, agent-visible
+#   symphony/.env                   shared, launcher-only
+#   projects/<slug>/.env            per-project, agent-visible
+#   projects/<slug>/symphony.env    per-project, launcher-only
+#
+# The agent/launcher split is the older one and unchanged: docker-compose.yml
+# hands the agent-visible files to its container wholesale, so symphony's
+# tracker token lives only in files that directive never names.
+#
+# The shared/per-project split is what lets one checkout run many stacks. Both
+# per-project files are optional — a project that only overrides credentials
+# needs no symphony.env at all.
 [ -f .env ] || { red "no .env found. Copy .env.example to .env and edit it first."; exit 1; }
 load_env ./.env
 
-# Symphony's own settings live beside its Dockerfile and WORKFLOW.md, not in the
-# root .env — docker-compose.yml hands that file to the AGENT's container
-# wholesale (`env_file: - .env`), so anything in it is readable by the agent,
-# and symphony's tracker token must not be. Optional: every key has a working
-# default, so the file queue runs without this file existing.
 SYMPHONY_ENV="./symphony/.env"
 [ -f "${SYMPHONY_ENV}" ] && load_env "${SYMPHONY_ENV}"
+
+PROJECT_ENV=""
+PROJECT_SYMPHONY_ENV=""
+if [ -n "${PROJECT}" ]; then
+    PROJECT_ENV="${PROJECT_DIR}/.env"
+    PROJECT_SYMPHONY_ENV="${PROJECT_DIR}/symphony.env"
+
+    # Derived BEFORE the project's own files are read, so an explicit value in
+    # them still wins. Deliberately after the shared files, though: symphony/.env
+    # ships concrete paths (./symphony-queue, ./symphony-workspaces), and a
+    # shared file must not be able to collapse every project onto one queue.
+    # Silent cross-project aliasing is the worst failure this layout can have —
+    # two orchestrators claiming the same item is exactly what the rename(2)
+    # argument in docs/SYMPHONY.md assumes cannot happen.
+    export PROJECT_SLUG="${PROJECT}"
+    export SYMPHONY_CONFIG_PATH="${PROJECT_DIR}/config"
+    export SYMPHONY_QUEUE_PATH="${PROJECT_DIR}/queue"
+    export SYMPHONY_WORKSPACES_PATH="${PROJECT_DIR}/workspaces"
+    # Opt-in: a project only gets its own egress surface if it ships one.
+    # Otherwise it shares the checkout-wide extra-allowlist.d, as before.
+    [ -d "${PROJECT_DIR}/allowlist.d" ] && export EXTRA_ALLOWLIST_PATH="${PROJECT_DIR}/allowlist.d"
+
+    [ -f "${PROJECT_ENV}" ] && load_env "${PROJECT_ENV}"
+    [ -f "${PROJECT_SYMPHONY_ENV}" ] && load_env "${PROJECT_SYMPHONY_ENV}"
+
+    # Read by docker-compose.yml's `env_file:` list — the ONLY way per-project
+    # values reach the agent's container. Everything else here is compose
+    # interpolation, which is a different mechanism.
+    [ -f "${PROJECT_ENV}" ] && export PROJECT_ENV_FILE="${PROJECT_ENV}"
+fi
 
 PROJECT_SLUG="${PROJECT_SLUG:-default}"
 QUEUE_PATH="${SYMPHONY_QUEUE_PATH:-./symphony-queue}"
@@ -52,13 +137,19 @@ CONFIG_PATH="${SYMPHONY_CONFIG_PATH:-./symphony}"
 WORKFLOW="${CONFIG_PATH}/WORKFLOW.md"
 SYMPHONY_CONTAINER="opencode-symphony-${PROJECT_SLUG}"
 
-# Both files have to reach compose's interpolation, and passing --env-file at
-# all disables its default ./.env discovery — so the root file is named
-# explicitly too. This is only about ${VAR} substitution in the compose files;
-# the `env_file:` directive inside docker-compose.yml is a separate mechanism
-# with a literal path, which is what keeps SYMPHONY_* out of the agent.
+# Every file has to reach compose's interpolation, and passing --env-file at all
+# disables its default ./.env discovery — so the root file is named explicitly
+# too. Same order as the loads above, so compose resolves ${VAR} exactly as this
+# script did. (The launcher's own exported environment outranks all of them,
+# which is what makes the derived per-project paths stick.)
 COMPOSE=(docker compose --env-file .env)
 [ -f "${SYMPHONY_ENV}" ] && COMPOSE+=(--env-file "${SYMPHONY_ENV}")
+[ -n "${PROJECT_ENV}" ] && [ -f "${PROJECT_ENV}" ] && COMPOSE+=(--env-file "${PROJECT_ENV}")
+[ -n "${PROJECT_SYMPHONY_ENV}" ] && [ -f "${PROJECT_SYMPHONY_ENV}" ] && COMPOSE+=(--env-file "${PROJECT_SYMPHONY_ENV}")
+# Container names and volumes are all ${PROJECT_SLUG}-suffixed, but the compose
+# PROJECT NAME is what makes two stacks separate objects to compose itself —
+# without -p, `up` on one would treat the other's containers as orphans.
+COMPOSE+=(-p "opencode-${PROJECT_SLUG}")
 COMPOSE+=(-f docker-compose.yml)
 [ -n "${USER_LAYER_PATH:-}" ] && COMPOSE+=(-f docker-compose.user-layer.yml)
 COMPOSE+=(-f docker-compose.symphony.yml)
@@ -216,34 +307,85 @@ allowlist_agreement() {
 
 preflight() {
     local fatal=0 kind stale
-    info "preflight (project: ${PROJECT_SLUG})"
+    if [ -n "${PROJECT}" ]; then
+        info "preflight (project: ${PROJECT_SLUG}, from ${PROJECT_DIR})"
+    else
+        info "preflight (project: ${PROJECT_SLUG})"
+    fi
+
+    # An AGENT-visible env file must not sit inside the directory mounted at
+    # /config. That mount is symphony's, and symphony is supposed to hold the
+    # Reporter token and nothing else — the whole point of the two-token split.
+    # The agent's Developer token readable from inside the orchestrator quietly
+    # undoes it.
+    #
+    # Narrowly about the agent's files, matched by inode rather than by name:
+    # symphony/.env is in the default config directory and is fine there, being
+    # symphony's own token in symphony's own container. The case that is not
+    # fine is SYMPHONY_CONFIG_PATH pointing at a project directory, which holds
+    # the agent's .env one level above its config/.
+    if [ -d "${CONFIG_PATH}" ]; then
+        local found agent_env
+        for found in "${CONFIG_PATH}"/.env "${CONFIG_PATH}"/*.env; do
+            [ -f "${found}" ] || continue
+            for agent_env in .env ${PROJECT_ENV:+"${PROJECT_ENV}"}; do
+                [ -f "${agent_env}" ] || continue
+                if [ "${found}" -ef "${agent_env}" ]; then
+                    red "  ✗ ${agent_env} is inside ${CONFIG_PATH}, which is mounted into the symphony container"
+                    red "    symphony would be able to read the agent's credentials — point"
+                    red "    SYMPHONY_CONFIG_PATH at a subdirectory holding only WORKFLOW.md"
+                    fatal=1
+                fi
+            done
+        done
+    fi
+
+    # PROJECT_SLUG drives container names and volume names; the directory name
+    # drives the queue, workspaces and WORKFLOW.md paths. When they disagree,
+    # `docker ps` and `ls projects/` describe different things and every later
+    # message in this script names the wrong one.
+    if [ -n "${PROJECT}" ] && [ "${PROJECT_SLUG}" != "${PROJECT}" ]; then
+        warn "  ! PROJECT_SLUG is '${PROJECT_SLUG}' but the project directory is '${PROJECT}'"
+        warn "    containers and volumes will be named for the former, paths for the latter"
+    fi
 
     # SYMPHONY_* used to live in the root .env. They still work from there — the
     # launcher loads both — but docker-compose.yml passes that whole file into
     # the AGENT's container, so a tracker token left behind is a token the agent
     # can read. Nothing else warns about this, because nothing else sees both
     # files.
-    if stale="$(grep -oE '^SYMPHONY_[A-Z_]+' .env | tr '\n' ' ')" && [ -n "${stale}" ]; then
-        warn "  ! SYMPHONY_* keys in the root .env: ${stale}"
-        warn "    move them to ${SYMPHONY_ENV} — the root .env is handed to the agent's container"
-    fi
+    # Both agent-visible files get this check: docker-compose.yml passes them to
+    # the AGENT's container wholesale, so a tracker token in either is a token
+    # the agent can read. It still WORKS from there — this script loads every
+    # layer — which is exactly why it needs saying.
+    local agent_file
+    for agent_file in .env ${PROJECT_ENV:+"${PROJECT_ENV}"}; do
+        [ -f "${agent_file}" ] || continue
+        if stale="$(grep -oE '^SYMPHONY_[A-Z_]+' "${agent_file}" | tr '\n' ' ')" && [ -n "${stale}" ]; then
+            warn "  ! SYMPHONY_* keys in ${agent_file}: ${stale}"
+            warn "    move them to ${PROJECT_SYMPHONY_ENV:-${SYMPHONY_ENV}} — ${agent_file} is handed to the agent's container"
+        fi
+    done
 
     # Same parser footgun the root .env carries, and the same fix: some .env
     # readers keep an inline `# comment` as part of the value. doctor.sh checks
-    # the root file; nothing else looks at this one.
-    if [ -f "${SYMPHONY_ENV}" ]; then
-        local inline
-        if inline="$(grep -nE '^[A-Za-z_][A-Za-z0-9_]*=[^#]*[[:space:]]#' "${SYMPHONY_ENV}")"; then
-            red "  ✗ inline '#' comments in ${SYMPHONY_ENV} — move them to their own lines:"
+    # the root file; nothing else looks at these.
+    local launcher_file inline
+    for launcher_file in ${SYMPHONY_ENV:+"${SYMPHONY_ENV}"} ${PROJECT_SYMPHONY_ENV:+"${PROJECT_SYMPHONY_ENV}"}; do
+        [ -f "${launcher_file}" ] || continue
+        if inline="$(grep -nE '^[A-Za-z_][A-Za-z0-9_]*=[^#]*[[:space:]]#' "${launcher_file}")"; then
+            red "  ✗ inline '#' comments in ${launcher_file} — move them to their own lines:"
             printf '      %s\n' "${inline}" >&2
             fatal=1
         fi
-    fi
+    done
 
     if [ ! -f "${WORKFLOW}" ]; then
+        # The examples ship in ./symphony/ and stay there — a project's config
+        # directory holds its own WORKFLOW.md, not another copy of the templates.
         red "  ✗ no ${WORKFLOW}"
-        red "    cp ${CONFIG_PATH}/WORKFLOW.md.example ${WORKFLOW}          # file queue"
-        red "    cp ${CONFIG_PATH}/WORKFLOW.gitlab.md.example ${WORKFLOW}   # GitLab issues"
+        red "    cp ./symphony/WORKFLOW.md.example ${WORKFLOW}          # file queue"
+        red "    cp ./symphony/WORKFLOW.gitlab.md.example ${WORKFLOW}   # GitLab issues"
         fatal=1
     else
         kind="$(tracker_kind)"
@@ -269,13 +411,32 @@ preflight() {
                 ok "  ✓ SYMPHONY_GITLAB_TOKEN set (should be a Reporter project token)"
             else
                 red "  ✗ tracker is gitlab but SYMPHONY_GITLAB_TOKEN is empty"
-                red "    set it in ${SYMPHONY_ENV} (cp symphony/.env.example symphony/.env)"
+                if [ -n "${PROJECT_SYMPHONY_ENV}" ]; then
+                    red "    set it in ${PROJECT_SYMPHONY_ENV} — a Reporter token reaches one project,"
+                    red "    so it belongs to this project and not to the shared ${SYMPHONY_ENV}"
+                else
+                    red "    set it in ${SYMPHONY_ENV} (cp symphony/.env.example symphony/.env)"
+                fi
                 fatal=1
             fi
             ok "  ✓ egress: ${SYMPHONY_HTTP_PROXY} (symphony reaches GitLab via squid)"
             if [ "${SYMPHONY_GITLAB_TOKEN:-}" = "${GITLAB_PAT:-}" ] && [ -n "${GITLAB_PAT:-}" ]; then
                 warn "  ! SYMPHONY_GITLAB_TOKEN and GITLAB_PAT are the same token"
                 warn "    the split only means anything if symphony's is Reporter and the agent's is Developer"
+            fi
+            # A Reporter token inherited from the shared symphony/.env reaches
+            # ONE project — whichever it was minted for. Used by a second stack
+            # it either 404s (confusing) or, if it happens to be a group token,
+            # hands that stack more reach than its own project. Either way the
+            # per-project token is the thing that makes the boundary per-project.
+            if [ -n "${PROJECT}" ] && [ -n "${SYMPHONY_GITLAB_TOKEN:-}" ] \
+               && [ -f "${SYMPHONY_ENV}" ] \
+               && { [ ! -f "${PROJECT_SYMPHONY_ENV}" ] \
+                    || ! grep -qE '^SYMPHONY_GITLAB_TOKEN=.' "${PROJECT_SYMPHONY_ENV}"; } \
+               && grep -qE '^SYMPHONY_GITLAB_TOKEN=.' "${SYMPHONY_ENV}"; then
+                warn "  ! SYMPHONY_GITLAB_TOKEN comes from the shared ${SYMPHONY_ENV}"
+                warn "    a project access token reaches one project — give ${PROJECT} its own in"
+                warn "    ${PROJECT_SYMPHONY_ENV}"
             fi
             ;;
         file_queue|"")
@@ -363,6 +524,14 @@ queue_status() {
     local d n total=0
     printf '\n  queue: %s\n' "${QUEUE_PATH}"
     for d in todo in-progress review failed done cancelled; do
+        # -d first: `find` on a missing directory exits non-zero, and under
+        # `set -o pipefail` that aborts the whole script. Reachable on any queue
+        # whose state directories have not been created yet — a freshly
+        # scaffolded project, or `status` before the first `up`.
+        if [ ! -d "${QUEUE_PATH}/${d}" ]; then
+            printf '    %-12s -\n' "${d}"
+            continue
+        fi
         n=$(find "${QUEUE_PATH}/${d}" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
         total=$((total + n))
         [ "${n}" -gt 0 ] && printf '    %-12s %s\n' "${d}" "${n}" || printf '    %-12s -\n' "${d}"
@@ -400,8 +569,51 @@ case "${cmd}" in
         "${COMPOSE[@]}" logs -f --tail=100 symphony "$@"
         ;;
 
+    config)
+        # The fully resolved stack, after four env layers and the derived
+        # per-project paths. With one env file you can read the file; with four
+        # plus derivation, "what did this actually resolve to" needs answering
+        # by the thing that did the resolving.
+        "${COMPOSE[@]}" config "$@"
+        ;;
+
     status)
         queue_status
+        ;;
+
+    projects)
+        # `ls projects/` with the two facts you cannot see from the directory
+        # name: which tracker it is on, and whether it is up. Reads each
+        # project's files directly rather than re-entering this script per
+        # project — nothing here needs the full layered configuration.
+        if [ ! -d ./projects ] || [ -z "$(find ./projects -mindepth 1 -maxdepth 1 -type d 2>/dev/null)" ]; then
+            printf '\n  no projects yet — create one with:\n'
+            printf '    ./scripts/new-project.sh <slug> [repo-path]\n\n'
+            printf '  the root .env and symphony/.env are still a complete\n'
+            printf '  single-project setup; -p is what opts into this directory.\n\n'
+            exit 0
+        fi
+        printf '\n  %-20s %-7s %-11s %s\n' SLUG PORT TRACKER STATE
+        for d in ./projects/*/; do
+            [ -d "${d}" ] || continue
+            s="$(basename "${d}")"
+            wf="${d}config/WORKFLOW.md"
+            k="-"
+            [ -f "${wf}" ] && k="$(sed -n '/^---$/,/^---$/p' "${wf}" \
+                | sed -n 's/^[[:space:]]*kind:[[:space:]]*\([a-z_]*\).*/\1/p' | head -1)"
+            # The port is read, not resolved: it is written once at scaffold
+            # time and is a plain setting thereafter.
+            p="$(sed -n 's|^OPENCODE_PORT=\(.*\)$|\1|p' "${d}.env" 2>/dev/null | tail -n1)"
+            if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "opencode-symphony-${s}"; then
+                st="symphony up"
+            elif docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "opencode-${s}"; then
+                st="opencode up"
+            else
+                st="-"
+            fi
+            printf '  %-20s %-7s %-11s %s\n' "${s}" "${p:-?}" "${k:--}" "${st}"
+        done
+        printf '\n  use one:  ./scripts/symphony -p <slug> check\n\n'
         ;;
 
     watch)
@@ -477,7 +689,10 @@ ITEM
 
     *)
         red "unknown command: ${cmd}"
-        sed -n '2,14p' "$0" >&2
+        # The whole leading comment block, found rather than hardcoded — a line
+        # range silently starts printing the wrong thing the moment the header
+        # grows, which is how it drifted before.
+        awk 'NR>1 && /^#/ {print; next} NR>1 {exit}' "$0" >&2
         exit 1
         ;;
 esac
