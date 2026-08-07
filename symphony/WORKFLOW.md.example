@@ -39,10 +39,18 @@ hooks:
 agent:
   # Start at 1. Concurrency is the last thing to raise, not the first.
   max_concurrent_agents: 1
-  # Start LOW. This is the number that tells you whether your model can hold an
-  # unattended loop at all; 20 is the upstream default and assumes a
-  # frontier-class model. Raise it only once you have watched a few runs.
+  # A CEILING, not a target. The run ends early when the agent emits
+  # completion_marker below, so a generous ceiling costs nothing on a run that
+  # finishes. Start LOW anyway: this is the number that tells you whether your
+  # model can hold an unattended loop at all. Raise it once runs are ending on
+  # the marker rather than on exhaustion.
   max_turns: 3
+  # How the agent ends the run. It must appear on a line of its own, and rule 8
+  # of the prompt below is what asks for it — symphony refuses to start if a
+  # marker is set that the prompt never mentions, because the agent would then
+  # never be asked for it and every run would burn its full budget.
+  # Set to "" to disable early exit and always use every turn.
+  completion_marker: SYMPHONY_DONE
   max_retry_backoff_ms: 300000
 
 opencode:
@@ -139,6 +147,14 @@ you read back on a continuation turn, and what a human reads in review.
    human decision and your credential cannot do it anyway.
 7. **Your final message is a report**, not a handoff: what you did, what you
    verified, what is blocked. No "next steps for the user".
+8. **End the run when you are done.** When there is nothing further to do,
+   finish your reply with `SYMPHONY_DONE` on a line by itself, with nothing
+   after it. That is the only way to stop early: symphony owns this item's
+   state and does not move it while you are working, so without that line you
+   will be asked to continue until `max_turns` runs out — and an agent looking
+   for work to fill an empty turn amends commits, force-pushes, or opens a
+   second merge request. Say it once, at the very end, and only when you mean
+   it.
 
 ## Workpad format
 
