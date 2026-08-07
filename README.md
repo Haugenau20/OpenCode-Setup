@@ -70,15 +70,22 @@ If something doesn't work, run `./scripts/doctor.sh` first.
 
 ## Working on more than one repo
 
-Each repo gets its own clone of this scaffold and its own `.env` (different
-`PROJECT_SLUG` and `OPENCODE_PORT`):
+One clone of this scaffold runs any number of stacks. Each repo gets a directory
+under `projects/` holding what differs — its port, its repo path, and above all
+its own credentials — layered on the root `.env`, which keeps what they share:
 
 ```
 ./scripts/new-project.sh myservice ~/code/myservice
-cd ../OpenCode-Setup-myservice
-$EDITOR .env
-docker compose up -d
+$EDITOR projects/myservice/.env
+./scripts/opencode -p myservice
 ```
+
+`./scripts/symphony projects` lists what exists, on which port, and whether it
+is up. Without `-p` both launchers read the root `.env` only, which is exactly
+what a single-project setup did before `projects/` existed.
+
+The layering rules, and the contract a launcher has to implement to run one of
+these, are in [`docs/MULTI_PROJECT.md`](docs/MULTI_PROJECT.md).
 
 ## Extra context folders
 

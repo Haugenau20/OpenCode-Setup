@@ -34,6 +34,60 @@ up. The vocabulary:
 `OPENCODE_INTERNAL_PORT` — every one defaults to today's behaviour). Symphony
 users additionally: `cp symphony/.env.example symphony/.env` and move any
 `SYMPHONY_*` keys there out of the root `.env`, where the agent can read them.
+**update launcher** — `PROJECT_ENV_FILE` and `EXTRA_ALLOWLIST_PATH` are a new
+compose contract the launcher has to set to run per-project stacks; see
+`docs/MULTI_PROJECT.md`. Nothing breaks if it does not: both default to
+today's behaviour.
+
+### Added
+- **Several projects from one checkout.** A project is a directory under
+  `projects/<slug>/` holding what differs between stacks — its port, its repo
+  path, its `WORKFLOW.md`, and above all its own scoped credentials. The root
+  `.env` and `symphony/.env` keep what they share, and the per-project files
+  layer over them (last value wins). Both launchers take `-p <slug>`; without
+  it they read the root files only, exactly as before.
+
+  Three things make it work, and they are the contract any launcher has to
+  implement (`docs/MULTI_PROJECT.md`):
+
+  - `PROJECT_ENV_FILE`, a second `env_file:` entry layered over `.env`. This is
+    the only one that could not be done another way: `--env-file` drives
+    compose *interpolation* and puts nothing in a container, so without this a
+    launcher can vary ports and paths but every project still gets one shared
+    set of credentials. A per-project value may also blank an inherited one
+    (`CONFLUENCE_PAT=`), which is how a symphony project keeps "credential
+    absence removes capability" without the root `.env` being empty for
+    everyone else.
+  - `EXTRA_ALLOWLIST_PATH`, so one stack can have a smaller egress surface than
+    the rest. `docs/SYMPHONY.md` §3 has always asked for this and it was not
+    expressible while every stack bind-mounted one shared directory.
+  - `-p opencode-<slug>` as the compose project name. Container names were
+    already slug-suffixed, but without a project name `up` on one stack treats
+    another's containers as orphans.
+
+  `scripts/new-project.sh` scaffolds a project instead of `cp -a`-ing the whole
+  checkout to a sibling directory — the old model made every project a full
+  duplicate of the harness, so an upgrade had to be applied N times and the
+  copies drifted (flagged in `docs/CROSS_REPO_REVIEW_2026-07.md` §1.15). Ports
+  are assigned at scaffold time, skipping any base or viewer port another
+  project already recorded.
+
+  Two new verbs: `./scripts/symphony projects` (what exists, on which port, up
+  or not) and `./scripts/symphony config` (the fully resolved stack — four env
+  layers plus derivation is more than you can resolve by reading the files).
+
+  Why not one stack serving several projects, which is the obvious design: the
+  containment model puts everything on scoped tokens, so merging projects A and
+  B into one container gives the agent working A the push token for B. Upstream
+  agrees by construction — symphony-queue builds exactly one tracker per
+  orchestrator. The goal is a cheap stack per project, not a shared one.
+
+### Fixed
+- **`./scripts/symphony status` no longer aborts on a queue whose state
+  directories do not exist yet.** `find` on a missing directory exits non-zero
+  and `set -o pipefail` turned that into a silent exit before the counts were
+  printed. Reachable on any freshly created queue — previously masked because
+  `add` and `up` both create the directories first.
 
 ### Added
 - **Writing to Confluence**, behind a new `ALLOW_CONFLUENCE_WRITE` gate in

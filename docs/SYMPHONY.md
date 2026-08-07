@@ -133,10 +133,15 @@ Then, all free and server-side, in the project or group settings:
 ### 2. Credential absence removes capability
 
 Each MCP server in this image auto-enables on credential presence. So the
-symphony stack gets its own root `.env` with **only** the sandbox GitLab PAT — no
-`BITBUCKET_PAT`, no `JIRA_PAT`, no `CONFLUENCE_PAT`, no `JFROG_PAT`, no
-`MFILES_PAT`. Those servers are then never wired into `opencode.json` at all.
-Not disabled: absent.
+symphony stack gets its own `projects/<slug>/.env` carrying **only** the sandbox
+GitLab PAT, and explicitly blanks the rest — `BITBUCKET_PAT=`, `JIRA_PAT=`,
+`CONFLUENCE_PAT=`, `JFROG_PAT=`, `MFILES_PAT=`. Those servers are then never
+wired into `opencode.json` at all. Not disabled: absent.
+
+Blanking rather than omitting is the part that matters, and it is what the
+per-project layer is for: the file layers *over* the root `.env`, so a key you
+simply leave out is inherited. An empty value is how you say "not here" while
+your other projects keep theirs.
 
 ### 3. Two tokens, neither able to do the other's job
 
@@ -429,40 +434,59 @@ Nothing watches merge-request state. A merged MR does not move an item to
 
 ### 1. A separate stack
 
-Symphony wants its own scaffold clone and its own `.env` — different
-`PROJECT_SLUG`, different `OPENCODE_PORT`, and critically a different, smaller
-set of credentials.
+Symphony wants its own stack — different `PROJECT_SLUG`, different
+`OPENCODE_PORT`, and critically a different, smaller set of credentials. That is
+a project:
 
 ```
 ./scripts/new-project.sh symphony ~/code/symphony-sandbox-repo
-cd ../OpenCode-Setup-symphony
-cp symphony/.env.example symphony/.env
-$EDITOR .env symphony/.env
 ```
 
-### 2. Two config files
+This creates `projects/symphony/` in the same checkout. Everything that differs
+between stacks lives in it; the root `.env` and `symphony/.env` keep what they
+share. One clone of this repo runs as many of these as you like — layout and the
+layering rules are in [`MULTI_PROJECT.md`](MULTI_PROJECT.md).
 
-The root `.env` is the **agent's** stack — `docker-compose.yml` passes it into
-the opencode container wholesale. `symphony/.env` is the **orchestrator's**, and
-is read only by `./scripts/symphony`. Keeping the tracker token out of the first
-file is the point of the split; see "Symphony holds nothing" above.
+Symphony is the case that makes the split necessary rather than merely tidy: a
+project access token reaches exactly one project, so it *cannot* be shared
+between stacks even in principle.
 
-`.env` — the agent:
+### 2. Four config files
+
+Two splits, at right angles to each other.
+
+**Agent vs orchestrator.** `docker-compose.yml` passes the agent's files into
+the opencode container wholesale; symphony's are read only by
+`./scripts/symphony` and are never named by an `env_file:` directive. Keeping
+the tracker token out of the agent's environment is the point — see "Symphony
+holds nothing" above.
+
+**Shared vs per-project.** Read in order, last value winning.
+
+| | agent's container | symphony's container |
+|---|---|---|
+| shared | `.env` | `symphony/.env` |
+| per-project | `projects/symphony/.env` | `projects/symphony/symphony.env` |
+
+`projects/symphony/.env` — the agent, for this project:
 
 ```
 PROJECT_SLUG=symphony
 OPENCODE_PORT=4097
-
-LLM_API_BASE=https://llm.internal.example/v1
-LLM_API_KEY=<yours>
+REPO_PATH=/home/you/code/symphony-sandbox-repo
 
 # The AGENT's token: project (or group) access token, Developer role.
 # NOT your personal PAT.
-GITLAB_BASE_URL=https://gitlab.internal.example
-GITLAB_USER=<you>
 GITLAB_PAT=<project access token, Developer, api+write_repository>
 
-# Leave every other *_PAT blank.
+# Blank every other credential. Each MCP server auto-enables on credential
+# presence, so a blank keeps that server out of THIS stack while your other
+# projects keep theirs. Absent, not disabled — §2 above.
+BITBUCKET_PAT=
+JIRA_PAT=
+JFROG_PAT=
+CONFLUENCE_PAT=
+MFILES_PAT=
 
 # Two gates, two planes: git (enforced by opencode/git-guard) and the API
 # (enforced by the MCP write gate). They are read by different processes, so
@@ -473,37 +497,57 @@ ALLOW_GITLAB_WRITE=1
 GITLAB_WRITE_PROJECTS=my-group/my-project
 ```
 
-`symphony/.env` — the orchestrator. Every key has a working default, so on the
-file queue you can skip this file entirely:
+The shared `.env` keeps what every project has in common — `LLM_API_BASE`,
+`LLM_API_KEY`, `GITLAB_BASE_URL`, `GITLAB_USER`, the image tag, your git
+identity.
+
+`projects/symphony/symphony.env` — the orchestrator, for this project. The queue,
+workspaces and config paths are derived from the project directory and need no
+entry; on the file queue you can skip this file entirely:
 
 ```
 # Only for tracker.kind: gitlab — SYMPHONY's token. Reporter role: it can
 # read/write issues on this one project and cannot push code. A separate
 # token from GITLAB_PAT above, deliberately.
 SYMPHONY_GITLAB_TOKEN=<project access token, Reporter, api>
-
-SYMPHONY_REF=v0.4.0
-SYMPHONY_QUEUE_PATH=./symphony-queue
-SYMPHONY_WORKSPACES_PATH=./symphony-workspaces
-SYMPHONY_CONFIG_PATH=./symphony
 ```
+
+Leave it commented out to inherit `SYMPHONY_GITLAB_TOKEN` from the shared
+`symphony/.env`, which is what a *group* access token over a sandbox group is
+for — one credential covering several projects (§1). `check` tells you which of
+the two you are running with, so it is never silent either way.
 
 There is no proxy setting: `./scripts/symphony` routes symphony through squid
 when `tracker.kind` is `gitlab` and leaves it with no route off-host otherwise.
 
 ### 3. Trim the allowlist
 
-The symphony stack does not need Confluence, M-Files, Jira or JFrog. Drop a file
-into `extra-allowlist.d/` covering only the LLM endpoint and GitLab, and remove
-the rest — reducing the surface before credentials even come into it.
+The symphony stack does not need Confluence, M-Files, Jira or JFrog. Create
+`projects/symphony/allowlist.d/` and drop in a `.conf` covering only the LLM
+endpoint and GitLab — reducing the surface before credentials even come into it.
+
+The directory is picked up automatically when it exists, and applies to this
+project alone. Without it the stack shares the checkout-wide
+`extra-allowlist.d/`, which is the right default for an interactive project and
+the wrong one here.
 
 ### 4. Workflow
 
 ```
-cp symphony/WORKFLOW.md.example symphony/WORKFLOW.md          # file queue
-cp symphony/WORKFLOW.gitlab.md.example symphony/WORKFLOW.md   # GitLab issues
-$EDITOR symphony/WORKFLOW.md
+cp symphony/WORKFLOW.md.example projects/symphony/config/WORKFLOW.md          # file queue
+cp symphony/WORKFLOW.gitlab.md.example projects/symphony/config/WORKFLOW.md   # GitLab issues
+$EDITOR projects/symphony/config/WORKFLOW.md
 ```
+
+It goes in `config/` rather than beside the project's `.env` for a reason: that
+directory is bind-mounted into the symphony container, and symphony is supposed
+to hold the Reporter token and nothing else. `check` refuses to start if an
+agent env file is readable from in there.
+
+`tracker.project_id` living in this file is what makes a workflow per-project —
+symphony deliberately does not interpolate environment variables into its
+config, so one template cannot serve several projects. Each project gets its
+own, which is also what keeps `WORKFLOW.md` legible as the whole trusted config.
 
 For the GitLab tracker, create the state labels on the project first —
 `symphony::todo`, `symphony::in-progress`, `symphony::review`,
@@ -531,22 +575,32 @@ Use the launcher — it composes the right `-f` flags and refuses to start on a
 misconfiguration:
 
 ```
-./scripts/symphony check     # preflight only, changes nothing
-./scripts/symphony up        # start
-./scripts/symphony logs      # follow the orchestrator
+./scripts/symphony -p symphony check     # preflight only, changes nothing
+./scripts/symphony -p symphony up        # start
+./scripts/symphony -p symphony logs      # follow the orchestrator
 ```
 
-Other verbs: `status` (per-directory queue counts), `watch` (status on a timer),
-`add "..."` (queue an item without hand-writing front matter), `stop`, `down`,
-`build`.
+`-p <slug>` selects the project; `SYMPHONY_PROJECT=symphony` does the same
+without repeating it. Without either, the launcher reads the root files only —
+the single-project setup, unchanged.
 
-`check` is worth running on its own after editing either env file. It refuses
-outright on a missing `WORKFLOW.md`, a GitLab tracker with no token, or a
-workspaces mount pointing at your real repo — and warns on the quieter
-mistakes: a `SYMPHONY_*` key left in the root `.env` where the agent can read
-it, one token used for both symphony and the agent, remote git on with no
-`GIT_REMOTE_ALLOWLIST`, writes enabled with no `GITLAB_WRITE_PROJECTS`, or more
-than one agent at a time before you have watched a full run.
+Other verbs: `status` (per-directory queue counts), `watch` (status on a timer),
+`add "..."` (queue an item without hand-writing front matter), `projects` (what
+exists, on which port, up or not), `config` (the fully resolved stack), `stop`,
+`down`, `build`.
+
+`check` is worth running on its own after editing any of the four env files. It
+refuses outright on a missing `WORKFLOW.md`, a GitLab tracker with no token, a
+workspaces mount pointing at your real repo, or an agent env file readable from
+inside the symphony container — and warns on the quieter mistakes: a
+`SYMPHONY_*` key left in an agent-visible file, one token used for both symphony
+and the agent, a tracker token inherited from the shared file rather than the
+project's own, remote git on with no `GIT_REMOTE_ALLOWLIST`, writes enabled with
+no `GITLAB_WRITE_PROJECTS`, or more than one agent at a time before you have
+watched a full run.
+
+`config` is the one to reach for when a value is not what you expected: four
+layers plus derivation is more than you can resolve by reading the files.
 
 ## Rolling this out
 
@@ -603,10 +657,14 @@ they match:
 
 | Token | Role | Scopes | Goes in |
 |---|---|---|---|
-| symphony's | **Reporter** | `api` | `SYMPHONY_GITLAB_TOKEN` |
-| the agent's | **Developer** | `api`, `write_repository` | `GITLAB_PAT` |
+| symphony's | **Reporter** | `api` | `SYMPHONY_GITLAB_TOKEN`, in `projects/<slug>/symphony.env` |
+| the agent's | **Developer** | `api`, `write_repository` | `GITLAB_PAT`, in `projects/<slug>/.env` |
 
-**4. `.env`**, on top of the base config in Setup above:
+Different files, and that is the mechanism rather than a filing convention:
+`docker-compose.yml` never names `symphony.env` in an `env_file:` directive, so
+the Reporter token has no path into the agent's environment.
+
+**4. `projects/<slug>/.env`**, on top of the base config in Setup above:
 
 ```
 ALLOW_REMOTE_GIT=1
@@ -621,7 +679,7 @@ against the tracker's project, so a typo in one is caught before the run.
 **5. `WORKFLOW.md`:**
 
 ```
-cp symphony/WORKFLOW.gitlab.md.example symphony/WORKFLOW.md
+cp symphony/WORKFLOW.gitlab.md.example projects/<slug>/config/WORKFLOW.md
 ```
 
 Set `tracker.base_url` and `tracker.project_id`, and **edit the clone URL in
@@ -632,9 +690,9 @@ the 1800000 the example ships with.
 **6. Go.**
 
 ```
-./scripts/symphony check     # fix everything it complains about first
-./scripts/symphony up
-./scripts/symphony logs      # leave this running
+./scripts/symphony -p <slug> check     # fix everything it complains about first
+./scripts/symphony -p <slug> up
+./scripts/symphony -p <slug> logs      # leave this running
 ```
 
 Then create an issue, label it `symphony::todo`, and watch.
