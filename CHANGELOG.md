@@ -295,6 +295,30 @@ today's behaviour.
   renders exactly as before.
 
 ### Fixed
+- **`GIT_REMOTE_ALLOWLIST` now checks destinations that are not the first
+  positional token.** The scanner walks past global options to the first
+  non-option token and treats it as the remote, which three real invocations
+  defeat. `git push --repo=<url>` writes the destination as a joined long
+  option, and the generic `--foo=bar` rule skipped it as one token — the gate
+  then validated the *default* remote, found it fine, and let the push go to
+  the URL. `git fetch --all` and a bare `git remote update` contact **every**
+  configured remote while only the default one was checked, so one stray
+  `git remote add` was enough to reach anywhere. Each is now enumerated:
+  `--repo` in either spelling, all configured remotes for `--all` and bare
+  `remote update`, every positional under `--multiple`, and `remotes.<group>`
+  entries expanded to their members. A destination outside the allowlist
+  refuses the whole invocation rather than the one remote, which is the safe
+  direction for a command that would otherwise partly succeed. This remains
+  defence in depth and not a security boundary — the agent still has a shell
+  and can call `/usr/bin/git` directly; the boundary is the token's scope. 12
+  new bats cases.
+- **`./scripts/doctor.sh` reported the GitLab write gate only on stacks that
+  also had Confluence credentials.** A missing `fi` left the GitLab block nested
+  inside the Confluence one — valid shell, and invisible in a diff. The effect
+  was that a GitLab-only deployment, which is precisely what a symphony stack
+  is, got no line at all about whether `ALLOW_GITLAB_WRITE` was on or whether
+  `GITLAB_WRITE_PROJECTS` narrowed it. The two blocks are siblings now, and a
+  static test asserts the nesting so the next edit cannot re-hide it.
 - **The unattended stack no longer mounts your real repo.** The symphony overlay
   layers on the base stack, which binds `${REPO_PATH}` at `/workspace` — so an
   unattended agent had read-write access to the developer's actual checkout.
