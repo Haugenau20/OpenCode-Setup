@@ -90,6 +90,20 @@ services:
   opencode:
     volumes:
       - ${SYMPHONY_WORKSPACES_PATH:-./symphony-workspaces}:/workspaces:z
+      # Replaces the base stack's ${REPO_PATH}:/workspace bind — compose merges
+      # volumes by TARGET, so naming /workspace here removes the host repo mount
+      # rather than adding to it.
+      #
+      # Under symphony that bind was exposure with no purpose. The agent clones
+      # each item fresh into /workspaces/<item>; nothing ever reads /workspace.
+      # But it is opencode's PROJECT ROOT, so unlike /workspaces it sits inside
+      # no permission gate at all — leaving an unattended agent read-write access
+      # to your real checkout, in the one mode where nobody is watching. The
+      # overlay already refuses to let SYMPHONY_WORKSPACES_PATH be REPO_PATH for
+      # exactly this reason; that guarded the side door while this stood open.
+      #
+      # An empty named volume satisfies the project root and holds nothing.
+      - oc_sym_workspace:/workspace
     environment:
       # Symphony's per-item workspaces sit OUTSIDE the /workspace project root,
       # and opencode gates any tool touching an external path behind
@@ -107,3 +121,10 @@ services:
       # the token: see docs/SYMPHONY.md.
       ALLOW_REMOTE_GIT: ${ALLOW_REMOTE_GIT:-0}
       GIT_REMOTE_ALLOWLIST: ${GIT_REMOTE_ALLOWLIST:-}
+
+volumes:
+  # Empty stand-in for the project root, so the unattended stack never mounts
+  # the developer's real repo. Disposable by construction: nothing writes here
+  # that anyone needs — the agent's work lives in /workspaces/<item>.
+  oc_sym_workspace:
+    name: opencode-${PROJECT_SLUG:-default}_sym_workspace

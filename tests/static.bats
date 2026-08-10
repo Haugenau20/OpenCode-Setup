@@ -370,3 +370,21 @@ shell_files() {
     grep -qE '\-p "opencode-\$\{PROJECT_SLUG' "$f" || { echo "$f does not pass -p" >&2; return 1; }
   done
 }
+
+@test "symphony overlay: the unattended stack does not mount the developer's repo" {
+  # /workspace is opencode's PROJECT ROOT, so unlike /workspaces it sits behind
+  # no permission gate. Under symphony nobody is watching, and the agent never
+  # reads it anyway — it clones each item fresh into /workspaces/<item>. The
+  # overlay must therefore REPLACE the base stack's ${REPO_PATH}:/workspace bind
+  # (compose merges volumes by target) rather than inherit it.
+  overlay="$REPO_ROOT/docker-compose.symphony.yml"
+  [ -f "$overlay" ] || skip "symphony overlay not present"
+  grep -q ':/workspace$' "$overlay" \
+    || { echo "overlay does not override the /workspace mount" >&2; return 1; }
+  # And it must not be a host path — a bind here would just move the exposure.
+  bad="$(grep -E '^\s+-\s+\$\{REPO_PATH.*:/workspace' "$overlay" || true)"
+  if [ -n "$bad" ]; then
+    echo "overlay still binds a host repo at /workspace: $bad" >&2
+    return 1
+  fi
+}

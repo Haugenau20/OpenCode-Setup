@@ -27,7 +27,7 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
-## [Unreleased]
+## [0.3.0] — 2026-08-10
 
 **Action required:** re-pull image + edit .env (new opt-in switches:
 `ALLOW_CONFLUENCE_WRITE`, `ALLOW_GITLAB_WRITE`, `GIT_REMOTE_ALLOWLIST`,
@@ -82,14 +82,6 @@ today's behaviour.
   agrees by construction — symphony-queue builds exactly one tracker per
   orchestrator. The goal is a cheap stack per project, not a shared one.
 
-### Fixed
-- **`./scripts/symphony status` no longer aborts on a queue whose state
-  directories do not exist yet.** `find` on a missing directory exits non-zero
-  and `set -o pipefail` turned that into a silent exit before the counts were
-  printed. Reachable on any freshly created queue — previously masked because
-  `add` and `up` both create the directories first.
-
-### Added
 - **Writing to Confluence**, behind a new `ALLOW_CONFLUENCE_WRITE` gate in
   `.env` — **default `0`**, and (like every other switch here) only the exact
   value `1` turns it on. With it set, the Confluence MCP grows four tools:
@@ -303,6 +295,24 @@ today's behaviour.
   renders exactly as before.
 
 ### Fixed
+- **The unattended stack no longer mounts your real repo.** The symphony overlay
+  layers on the base stack, which binds `${REPO_PATH}` at `/workspace` — so an
+  unattended agent had read-write access to the developer's actual checkout.
+  Unlike `/workspaces`, `/workspace` is opencode's PROJECT ROOT and therefore
+  sits behind no `permission.external_directory` gate at all, in the one mode
+  where nobody is watching to answer it. The overlay already refused to let
+  `SYMPHONY_WORKSPACES_PATH` be `REPO_PATH` for exactly this reason; that
+  guarded the side door while this stood open. The overlay now replaces the
+  mount with an empty named volume (compose merges volumes by target, so naming
+  `/workspace` removes the bind rather than adding to it). Nothing is lost:
+  symphony agents clone each item fresh into `/workspaces/<item>` and never read
+  `/workspace`.
+- **`./scripts/symphony status` no longer aborts on a queue whose state
+  directories do not exist yet.** `find` on a missing directory exits non-zero
+  and `set -o pipefail` turned that into a silent exit before the counts were
+  printed. Reachable on any freshly created queue — previously masked because
+  `add` and `up` both create the directories first.
+
 - **The symphony workflow prompts never told the agent to clone anything.** The
   `after_create` hook is empty on purpose — a clone there would force a
   repository credential into the symphony container, which holds only the
