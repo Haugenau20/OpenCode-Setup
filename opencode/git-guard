@@ -82,8 +82,10 @@ EOF
         ;;
     remote)
         subsub=""
+        subsub_idx=-1
         if find_subcommand $((sub_idx + 1)); then
-            subsub="${args[${REPLY}]}"
+            subsub_idx="${REPLY}"
+            subsub="${args[${subsub_idx}]}"
         fi
         case "${subsub}" in
             add|set-url|set-branches|set-head|prune|update)
@@ -205,44 +207,156 @@ EOF
     exit 1
 }
 
+# find_opt_value <--opt> <from-index> — value of an option that git's
+# parse-options accepts in either `--opt=value` or `--opt value` form. Sets
+# REPLY to the value and returns 0 on a hit; REPLY="" and 1 otherwise.
+find_opt_value() {
+    local want="$1" i="$2" tok
+    while [ "${i}" -lt "${argc}" ]; do
+        tok="${args[${i}]}"
+        case "${tok}" in
+            "${want}"=*)
+                REPLY="${tok#*=}"
+                return 0 ;;
+            "${want}")
+                if [ $((i + 1)) -lt "${argc}" ]; then
+                    REPLY="${args[$((i + 1))]}"
+                    return 0
+                fi
+                ;;
+        esac
+        i=$((i + 1))
+    done
+    REPLY=""
+    return 1
+}
+
+# has_flag <--flag> <from-index> — is this exact bare flag present?
+has_flag() {
+    local want="$1" i="$2"
+    while [ "${i}" -lt "${argc}" ]; do
+        [ "${args[${i}]}" = "${want}" ] && return 0
+        i=$((i + 1))
+    done
+    return 1
+}
+
+# add_all_remotes — every remote configured in this repo. The commands that
+# contact more than one destination per invocation need all of them checked,
+# not just whichever git would have picked by default.
+add_all_remotes() {
+    local r
+    while IFS= read -r r; do
+        [ -n "${r}" ] && targets+=("${r}")
+    done < <(real_git remote 2>/dev/null || true)
+}
+
+# add_remote_or_group <name> — `remotes.<name>` in the config is a GROUP: one
+# name standing for several remotes. Expand it, or fall through to the name
+# itself when no such group exists.
+add_remote_or_group() {
+    local name="$1" members r
+    members="$(real_git config --get-all "remotes.${name}" 2>/dev/null || true)"
+    if [ -n "${members}" ]; then
+        for r in ${members}; do
+            targets+=("${r}")
+        done
+    else
+        targets+=("${name}")
+    fi
+}
+
 if [ -n "${GIT_REMOTE_ALLOWLIST:-}" ]; then
-    target_ref=""
-    check_target=0
+    # Every destination this invocation could contact. One empty element means
+    # "none was named, so check whatever git would resolve by default"; an empty
+    # ARRAY means nothing will be contacted at all and there is nothing to gate.
+    targets=()
+    idx=0
 
     case "${sub}" in
         clone)
             # first non-option token after `clone` is the URL
             if find_subcommand $((sub_idx + 1)); then
-                target_ref="${args[${REPLY}]}"
+                targets+=("${args[${REPLY}]}")
+            else
+                targets+=("")
             fi
-            check_target=1
             ;;
-        push|fetch|pull|ls-remote)
+        push)
+            # `--repo=<url>` is a destination in its own right — git falls back
+            # to it when no repository is named positionally — and it is written
+            # as a joined long option, which the scanner above skips as one
+            # token. Left unread it walked straight past this gate.
+            if find_opt_value --repo $((sub_idx + 1)); then
+                targets+=("${REPLY}")
+            fi
+            if find_subcommand $((sub_idx + 1)); then
+                targets+=("${args[${REPLY}]}")
+            fi
+            # Note: `push --all` means all BRANCHES, not all remotes.
+            [ "${#targets[@]}" -gt 0 ] || targets+=("")
+            ;;
+        fetch)
+            # `--all` contacts every configured remote and `--multiple` reads
+            # every positional as one, so checking a single token would wave the
+            # rest through.
+            if has_flag --all $((sub_idx + 1)); then
+                add_all_remotes
+            elif has_flag --multiple $((sub_idx + 1)); then
+                idx=$((sub_idx + 1))
+                while find_subcommand "${idx}"; do
+                    add_remote_or_group "${args[${REPLY}]}"
+                    idx=$((REPLY + 1))
+                done
+            elif find_subcommand $((sub_idx + 1)); then
+                targets+=("${args[${REPLY}]}")
+            else
+                targets+=("")
+            fi
+            ;;
+        pull|ls-remote)
             # optional; absent means git resolves the default remote
             if find_subcommand $((sub_idx + 1)); then
-                target_ref="${args[${REPLY}]}"
+                targets+=("${args[${REPLY}]}")
+            else
+                targets+=("")
             fi
-            check_target=1
             ;;
         remote)
-            # `remote add <name> <url>` / `remote set-url [--add] <name> <url>`
             case "${subsub}" in
+                # `remote add <name> <url>` / `remote set-url [--add] <name> <url>`
                 add|set-url)
                     if find_subcommand $((sub_idx + 1)) \
                         && find_subcommand $((REPLY + 1)) \
                         && find_subcommand $((REPLY + 1)); then
-                        target_ref="${args[${REPLY}]}"
-                        check_target=1
+                        targets+=("${args[${REPLY}]}")
+                    fi
+                    ;;
+                # `remote update [<group|remote>...]` — bare, it updates every
+                # remote; named, each argument may itself be a group.
+                update)
+                    # From after `update` itself, not after `remote` — the
+                    # subcommand token is not one of its arguments.
+                    idx=$((subsub_idx + 1))
+                    if find_subcommand "${idx}"; then
+                        while find_subcommand "${idx}"; do
+                            add_remote_or_group "${args[${REPLY}]}"
+                            idx=$((REPLY + 1))
+                        done
+                    else
+                        add_all_remotes
                     fi
                     ;;
             esac
             ;;
     esac
 
-    if [ "${check_target}" -eq 1 ]; then
+    # Zero targets is the "nothing will be contacted" case (`fetch --all` in a
+    # repo with no remotes); the loop then correctly checks nothing.
+    for target_ref in ${targets[@]+"${targets[@]}"}; do
         resolved="$(resolve_remote_url "${target_ref}")"
         remote_allowed "${resolved}" || deny_remote "${resolved}"
-    fi
+    done
 fi
 
 exec "${REAL_GIT}" "$@"

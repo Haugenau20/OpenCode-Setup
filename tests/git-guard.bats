@@ -396,3 +396,87 @@ refused() {
   [[ "$output" == *"$PROD_URL"* ]]
   [[ "$output" == *"$ALLOWLIST"* ]]
 }
+
+# --- destinations that are not the first positional token -------------------
+# The scanner walks to the first non-option token and treats it as the remote.
+# Three git invocations name a destination somewhere else entirely, and each one
+# used to sail past this gate: `--repo=<url>` is a joined long option (skipped
+# as one token), while `fetch --all` and a bare `remote update` contact EVERY
+# configured remote and only the default one was ever checked.
+
+@test "allowlist: push --repo=<url> outside the sandbox is refused" {
+  allow_guard push --repo="$PROD_URL"
+  refused
+}
+
+@test "allowlist: push --repo <url> (separate token) is refused too" {
+  allow_guard push --repo "$PROD_URL"
+  refused
+}
+
+@test "allowlist: push --repo inside the sandbox is permitted" {
+  allow_guard push --repo="$SANDBOX_URL"
+  [[ "$output" != *"not in GIT_REMOTE_ALLOWLIST"* ]]
+}
+
+@test "allowlist: --repo is checked even when a positional remote is allowed" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  allow_guard push --repo="$PROD_URL" origin main
+  refused
+}
+
+@test "allowlist: fetch --all refuses when ANY configured remote is outside" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  git -C "$REPO" remote add upstream "$PROD_URL"
+  allow_guard fetch --all
+  refused
+  [[ "$output" == *"$PROD_URL"* ]]
+}
+
+@test "allowlist: fetch --all is permitted when every remote is inside" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  allow_guard fetch --all
+  [[ "$output" != *"not in GIT_REMOTE_ALLOWLIST"* ]]
+}
+
+@test "allowlist: fetch --all with no remotes contacts nothing and is allowed" {
+  allow_guard fetch --all
+  [[ "$output" != *"not in GIT_REMOTE_ALLOWLIST"* ]]
+}
+
+@test "allowlist: fetch --multiple checks every named remote, not just the first" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  git -C "$REPO" remote add upstream "$PROD_URL"
+  allow_guard fetch --multiple origin upstream
+  refused
+  [[ "$output" == *"$PROD_URL"* ]]
+}
+
+@test "allowlist: bare remote update refuses when any remote is outside" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  git -C "$REPO" remote add upstream "$PROD_URL"
+  allow_guard remote update
+  refused
+}
+
+@test "allowlist: remote update names a remote, and 'update' is not one" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  allow_guard remote update origin
+  [[ "$output" != *"not in GIT_REMOTE_ALLOWLIST"* ]]
+}
+
+@test "allowlist: remote update expands a remotes.<group> into its members" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  git -C "$REPO" remote add upstream "$PROD_URL"
+  git -C "$REPO" config --add remotes.everything "origin upstream"
+  allow_guard remote update everything
+  refused
+  [[ "$output" == *"$PROD_URL"* ]]
+}
+
+@test "allowlist: remote -v is a local read and stays ungated" {
+  git -C "$REPO" remote add upstream "$PROD_URL"
+  ALLOW_REMOTE_GIT=1 GIT_REMOTE_ALLOWLIST="$ALLOWLIST" run_guard remote -v
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"upstream"* ]]
+}
