@@ -250,3 +250,233 @@ run_guard() {
   run git --help -a
   [ "$real_status" -eq "$status" ]
 }
+
+# --- GIT_REMOTE_ALLOWLIST: destination gate ----------------------------------
+#
+# The second gate. ALLOW_REMOTE_GIT=1 throughout this section — the question is
+# no longer "may remote git run" but "may it reach THAT remote". Blocked here
+# means the allowlist rejected the destination, which is a different message
+# from the ALLOW_REMOTE_GIT refusal above.
+
+SANDBOX_URL="https://gitlab.internal.example/symphony-sandbox/demo.git"
+PROD_URL="https://gitlab.internal.example/production/payments.git"
+ALLOWLIST="gitlab.internal.example/symphony-sandbox/"
+
+# allow_guard [args...] — remote git enabled, allowlist set, run from $REPO.
+allow_guard() {
+  ALLOW_REMOTE_GIT=1 GIT_REMOTE_ALLOWLIST="$ALLOWLIST" run_guard "$@"
+}
+
+# refused — true when the allowlist (not the ALLOW_REMOTE_GIT gate) rejected it.
+refused() {
+  [ "$status" -ne 0 ] && [[ "$output" == *"not in GIT_REMOTE_ALLOWLIST"* ]]
+}
+
+@test "allowlist unset: any destination still passes (back-compat)" {
+  ALLOW_REMOTE_GIT=1 run_guard clone "$PROD_URL" "$BATS_TEST_TMPDIR/x"
+  [[ "$output" != *"not in GIT_REMOTE_ALLOWLIST"* ]]
+}
+
+@test "allowlist: clone inside the sandbox prefix is permitted" {
+  allow_guard clone "$SANDBOX_URL" "$BATS_TEST_TMPDIR/x"
+  [[ "$output" != *"not in GIT_REMOTE_ALLOWLIST"* ]]
+}
+
+@test "allowlist: clone outside the sandbox prefix is refused" {
+  allow_guard clone "$PROD_URL" "$BATS_TEST_TMPDIR/x"
+  refused
+}
+
+@test "allowlist: push to an explicit out-of-sandbox URL is refused" {
+  allow_guard push "$PROD_URL" main
+  refused
+}
+
+@test "allowlist: push to a named remote resolves the remote's URL" {
+  git -C "$REPO" remote add origin "$PROD_URL"
+  allow_guard push origin main
+  refused
+}
+
+@test "allowlist: push to a named in-sandbox remote is permitted" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  allow_guard push origin main
+  [[ "$output" != *"not in GIT_REMOTE_ALLOWLIST"* ]]
+}
+
+@test "allowlist: bare push resolves the default remote" {
+  git -C "$REPO" remote add origin "$PROD_URL"
+  allow_guard push
+  refused
+}
+
+@test "allowlist: scp-style git@host:path is normalized, not waved through" {
+  allow_guard clone "git@gitlab.internal.example:production/payments.git" "$BATS_TEST_TMPDIR/x"
+  refused
+}
+
+@test "allowlist: scp-style inside the sandbox is permitted" {
+  allow_guard clone "git@gitlab.internal.example:symphony-sandbox/demo.git" "$BATS_TEST_TMPDIR/x"
+  [[ "$output" != *"not in GIT_REMOTE_ALLOWLIST"* ]]
+}
+
+@test "allowlist: prefix match respects path segments (sandbox-evil is refused)" {
+  allow_guard clone "https://gitlab.internal.example/symphony-sandbox-evil/x.git" "$BATS_TEST_TMPDIR/x"
+  refused
+}
+
+@test "allowlist: a port on the URL does not defeat the match" {
+  allow_guard clone "https://gitlab.internal.example:8443/production/payments.git" "$BATS_TEST_TMPDIR/x"
+  refused
+}
+
+@test "allowlist: userinfo in the URL does not defeat the match" {
+  allow_guard clone "https://user:token@gitlab.internal.example/production/payments.git" "$BATS_TEST_TMPDIR/x"
+  refused
+}
+
+@test "allowlist: remote add pointing outside the sandbox is refused" {
+  allow_guard remote add evil "$PROD_URL"
+  refused
+}
+
+@test "allowlist: remote set-url pointing outside the sandbox is refused" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  allow_guard remote set-url origin "$PROD_URL"
+  refused
+}
+
+@test "allowlist: remote set-url inside the sandbox is permitted" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  allow_guard remote set-url origin "https://gitlab.internal.example/symphony-sandbox/other.git"
+  [ "$status" -eq 0 ]
+}
+
+@test "allowlist: git -C resolves the remote in the TARGET repo, not the cwd" {
+  # The cwd repo is in-sandbox; the -C target is not. Reading remotes from the
+  # wrong repo here would wave through a push to production.
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  other="$BATS_TEST_TMPDIR/other"
+  mkdir -p "$other"
+  git -C "$other" init -q
+  git -C "$other" remote add origin "$PROD_URL"
+  allow_guard -C "$other" push origin main
+  refused
+}
+
+@test "allowlist: --git-dir resolves the remote in the target repo" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  other="$BATS_TEST_TMPDIR/other2"
+  mkdir -p "$other"
+  git -C "$other" init -q
+  git -C "$other" remote add origin "$PROD_URL"
+  allow_guard --git-dir="$other/.git" --work-tree="$other" push origin main
+  refused
+}
+
+@test "allowlist: an unknown remote name is refused, not waved through" {
+  allow_guard push nosuchremote main
+  refused
+}
+
+@test "allowlist: comma-separated entries are honoured" {
+  ALLOW_REMOTE_GIT=1 \
+    GIT_REMOTE_ALLOWLIST="gitlab.internal.example/a/,gitlab.internal.example/symphony-sandbox/" \
+    run_guard clone "$SANDBOX_URL" "$BATS_TEST_TMPDIR/x"
+  [[ "$output" != *"not in GIT_REMOTE_ALLOWLIST"* ]]
+}
+
+@test "allowlist: does not gate local-only subcommands" {
+  ALLOW_REMOTE_GIT=1 GIT_REMOTE_ALLOWLIST="$ALLOWLIST" run_guard status
+  [ "$status" -eq 0 ]
+}
+
+@test "allowlist: refusal explains itself and names the destination" {
+  allow_guard clone "$PROD_URL" "$BATS_TEST_TMPDIR/x"
+  [[ "$output" == *"$PROD_URL"* ]]
+  [[ "$output" == *"$ALLOWLIST"* ]]
+}
+
+# --- destinations that are not the first positional token -------------------
+# The scanner walks to the first non-option token and treats it as the remote.
+# Three git invocations name a destination somewhere else entirely, and each one
+# used to sail past this gate: `--repo=<url>` is a joined long option (skipped
+# as one token), while `fetch --all` and a bare `remote update` contact EVERY
+# configured remote and only the default one was ever checked.
+
+@test "allowlist: push --repo=<url> outside the sandbox is refused" {
+  allow_guard push --repo="$PROD_URL"
+  refused
+}
+
+@test "allowlist: push --repo <url> (separate token) is refused too" {
+  allow_guard push --repo "$PROD_URL"
+  refused
+}
+
+@test "allowlist: push --repo inside the sandbox is permitted" {
+  allow_guard push --repo="$SANDBOX_URL"
+  [[ "$output" != *"not in GIT_REMOTE_ALLOWLIST"* ]]
+}
+
+@test "allowlist: --repo is checked even when a positional remote is allowed" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  allow_guard push --repo="$PROD_URL" origin main
+  refused
+}
+
+@test "allowlist: fetch --all refuses when ANY configured remote is outside" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  git -C "$REPO" remote add upstream "$PROD_URL"
+  allow_guard fetch --all
+  refused
+  [[ "$output" == *"$PROD_URL"* ]]
+}
+
+@test "allowlist: fetch --all is permitted when every remote is inside" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  allow_guard fetch --all
+  [[ "$output" != *"not in GIT_REMOTE_ALLOWLIST"* ]]
+}
+
+@test "allowlist: fetch --all with no remotes contacts nothing and is allowed" {
+  allow_guard fetch --all
+  [[ "$output" != *"not in GIT_REMOTE_ALLOWLIST"* ]]
+}
+
+@test "allowlist: fetch --multiple checks every named remote, not just the first" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  git -C "$REPO" remote add upstream "$PROD_URL"
+  allow_guard fetch --multiple origin upstream
+  refused
+  [[ "$output" == *"$PROD_URL"* ]]
+}
+
+@test "allowlist: bare remote update refuses when any remote is outside" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  git -C "$REPO" remote add upstream "$PROD_URL"
+  allow_guard remote update
+  refused
+}
+
+@test "allowlist: remote update names a remote, and 'update' is not one" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  allow_guard remote update origin
+  [[ "$output" != *"not in GIT_REMOTE_ALLOWLIST"* ]]
+}
+
+@test "allowlist: remote update expands a remotes.<group> into its members" {
+  git -C "$REPO" remote add origin "$SANDBOX_URL"
+  git -C "$REPO" remote add upstream "$PROD_URL"
+  git -C "$REPO" config --add remotes.everything "origin upstream"
+  allow_guard remote update everything
+  refused
+  [[ "$output" == *"$PROD_URL"* ]]
+}
+
+@test "allowlist: remote -v is a local read and stays ungated" {
+  git -C "$REPO" remote add upstream "$PROD_URL"
+  ALLOW_REMOTE_GIT=1 GIT_REMOTE_ALLOWLIST="$ALLOWLIST" run_guard remote -v
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"upstream"* ]]
+}

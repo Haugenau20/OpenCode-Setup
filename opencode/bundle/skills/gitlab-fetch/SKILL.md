@@ -1,6 +1,6 @@
 ---
 name: gitlab-fetch
-description: "Fetches code context from the internal GitLab instance using the GitLab MCP tools — projects, commits, merge requests (with review comments/notes), MR diffs and changed files, and file contents. Use whenever the user wants to look up, fetch, find, search, browse, or cross-reference GitLab — even if they don't say 'GitLab' explicitly. Especially for the Jira → GitLab cross-reference: tracing a ticket to the commits/MRs that implemented it, reading an MR's diff or review discussion, finding which MR introduced a change, or reading a source file at a given ref. Trigger phrases include 'find the MR for PROJ-123', 'what changed in project X', 'show commits mentioning VAE-45', 'read file Y from gitlab repo Z', 'why was this implemented this way'. Read-only."
+description: "Fetches code context from the internal GitLab instance using the GitLab MCP tools — projects, commits, merge requests (with review comments/notes), MR diffs and changed files, and file contents. Use whenever the user wants to look up, fetch, find, search, browse, or cross-reference GitLab — even if they don't say 'GitLab' explicitly. Especially for the Jira → GitLab cross-reference: tracing a ticket to the commits/MRs that implemented it, reading an MR's diff or review discussion, finding which MR introduced a change, or reading a source file at a given ref. Trigger phrases include 'find the MR for PROJ-123', 'what changed in project X', 'show commits mentioning VAE-45', 'read file Y from gitlab repo Z', 'why was this implemented this way'. Also covers GitLab issues and CI pipeline status. Read-only; writing is the separate gitlab-write skill."
 ---
 
 # GitLab MCP — Agent Skill
@@ -126,3 +126,27 @@ argument for every other tool.
   to know *which* files changed, to avoid pulling a large diff unnecessarily.
 - `gitlab_get_file` on a config file (e.g. `pom.xml`, `build.gradle`,
   `Dockerfile`) is useful for understanding dependencies and build setup.
+
+
+---
+
+## Issues, CI, and the write surface
+
+Beyond code context, the server exposes GitLab issues and pipelines:
+
+```
+gitlab_list_issues(project, labels=[...], state="opened")  → filter the backlog
+gitlab_get_issue(project, issueIid)                        → one issue, full text
+gitlab_get_issue_notes(project, issueIid)                  → its comments (+ note ids)
+gitlab_get_pipelines(project, ref="my-branch")             → is that branch green?
+```
+
+`issueIid` is the `#N` shown in the UI — the per-project internal id, **not** the
+global `id` field. Passing the wrong one 404s.
+
+`gitlab_list_issues` **ANDs** its `labels` filter: every label listed must be
+present. GitLab has no OR, so to match any-of, fetch broadly and filter yourself.
+
+Writing — opening merge requests, commenting, filing issues — lives in the
+separate **`gitlab-write`** skill, which is present only when
+`ALLOW_GITLAB_WRITE=1`. If you do not see it, this deployment is read-only.

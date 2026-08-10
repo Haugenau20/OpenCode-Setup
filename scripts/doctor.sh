@@ -212,17 +212,33 @@ if docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
         check_mcp "${svc}" "${want}"
     done
 
-    # Confluence is the only MCP with a write plane, gated separately from its
-    # credentials (ALLOW_CONFLUENCE_WRITE, default off — same posture as
-    # ALLOW_REMOTE_GIT). Report which side of that gate the stack is on: "the
-    # agent says it can't create pages" is otherwise indistinguishable from a
-    # broken MCP.
+    # Two MCPs have a write plane, each gated separately from its credentials
+    # (ALLOW_<SVC>_WRITE, default off — same posture as ALLOW_REMOTE_GIT).
+    # Report which side of that gate the stack is on: "the agent says it can't
+    # create pages" is otherwise indistinguishable from a broken MCP.
     if [ -n "${CONFLUENCE_BASE_URL:-}" ] && [ -n "${CONFLUENCE_PAT:-}" ] \
         && [ "${DISABLE_CONFLUENCE_MCP:-0}" != "1" ]; then
         if [ "${ALLOW_CONFLUENCE_WRITE:-0}" = "1" ]; then
             ok "confluence: writes ENABLED (ALLOW_CONFLUENCE_WRITE=1 — can create/edit pages)"
         else
             ok "confluence: read-only (set ALLOW_CONFLUENCE_WRITE=1 in .env to allow page writes)"
+        fi
+    fi
+
+    # Independent of the Confluence block above: the two write planes are
+    # separate MCPs with separate credentials, and a GitLab-only stack — which
+    # is what a symphony deployment is — has no Confluence keys at all.
+    if [ -n "${GITLAB_BASE_URL:-}" ] && [ -n "${GITLAB_PAT:-}" ] \
+        && [ "${DISABLE_GITLAB_MCP:-0}" != "1" ]; then
+        if [ "${ALLOW_GITLAB_WRITE:-0}" = "1" ]; then
+            ok "gitlab: writes ENABLED (ALLOW_GITLAB_WRITE=1 — can open MRs, comment, file issues)"
+            if [ -n "${GITLAB_WRITE_PROJECTS:-}" ]; then
+                ok "gitlab: writes limited to ${GITLAB_WRITE_PROJECTS}"
+            else
+                warn "gitlab: writes NOT limited by project (GITLAB_WRITE_PROJECTS is empty)"
+            fi
+        else
+            ok "gitlab: read-only (set ALLOW_GITLAB_WRITE=1 in .env to allow writes)"
         fi
     fi
 else

@@ -499,17 +499,22 @@ for entry in ${MCP_SERVICES}; do
     fi
 done
 
-# The Confluence server is the one MCP with a write plane, gated the same way
-# remote git is (§8): default off, only "1" turns it on. Surface which side of
-# that gate this boot landed on — the server itself just silently registers
-# fewer tools, which is invisible from outside the container.
-if printf ' %s ' "${MCPS_ENABLED_SET}" | grep -q " confluence "; then
-    if [ "${ALLOW_CONFLUENCE_WRITE:-0}" = "1" ]; then
-        log "mcp rw:  confluence (ALLOW_CONFLUENCE_WRITE=1 — can create and edit pages)"
+# The MCPs with a write plane are gated the same way remote git is (§8):
+# default off, only "1" turns it on. Surface which side of that gate this boot
+# landed on — a server with writes off just silently registers fewer tools,
+# which is invisible from outside the container. One row per service:
+# <mcp>:<ALLOW var>:<what writes mean>.
+MCP_WRITE_PLANES="confluence:ALLOW_CONFLUENCE_WRITE:can create and edit pages
+gitlab:ALLOW_GITLAB_WRITE:can open MRs and comment"
+printf '%s\n' "${MCP_WRITE_PLANES}" | while IFS=: read -r svc var what; do
+    [ -n "${svc}" ] || continue
+    printf ' %s ' "${MCPS_ENABLED_SET}" | grep -q " ${svc} " || continue
+    if [ "$(eval "printf '%s' \"\${${var}:-0}\"")" = "1" ]; then
+        log "mcp rw:  ${svc} (${var}=1 — ${what})"
     else
-        log "mcp ro:  confluence (set ALLOW_CONFLUENCE_WRITE=1 to allow page writes)"
+        log "mcp ro:  ${svc} (set ${var}=1 to allow writes)"
     fi
-fi
+done
 
 # ---- 4c. Extra instruction files (generic hook) ------------------------------
 # Append any paths in OPENCODE_EXTRA_INSTRUCTIONS to opencode.json's

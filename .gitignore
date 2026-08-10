@@ -9,6 +9,30 @@ ca/*.pem
 ca/*.cer
 !ca/.gitkeep
 
+# Patch files handed over for the symphony-queue repo. They are a delivery
+# artifact for a DIFFERENT repository and must never be committed here.
+patches-symphony-queue/
+*.patch
+
+# Symphony: the work queue and the per-item agent workspaces are local state.
+# Track the queue deliberately if you want its history; it is ignored by
+# default so a scratch queue never lands in a commit.
+# (symphony/.env holds the tracker token and is already covered by the `.env`
+# rule at the top, which matches at any depth.)
+symphony-queue/
+symphony-workspaces/
+symphony/WORKFLOW.md
+
+# Per-project stacks (scripts/new-project.sh). Everything under projects/ is
+# local state: scoped credentials, the project's WORKFLOW.md, its queue and its
+# disposable workspaces. The directory itself is tracked so the layout is
+# discoverable in a fresh clone.
+#   projects/<slug>/.env         — already covered by the `.env` rule above
+#   projects/<slug>/symphony.env — is not, hence the explicit rule
+projects/*
+!projects/.gitkeep
+!projects/README.md
+
 # Local per-developer extras
 user-layer/
 extra-allowlist.d/*.conf

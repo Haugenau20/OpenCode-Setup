@@ -82,8 +82,10 @@ EOF
         ;;
     remote)
         subsub=""
+        subsub_idx=-1
         if find_subcommand $((sub_idx + 1)); then
-            subsub="${args[${REPLY}]}"
+            subsub_idx="${REPLY}"
+            subsub="${args[${subsub_idx}]}"
         fi
         case "${subsub}" in
             add|set-url|set-branches|set-head|prune|update)
@@ -95,5 +97,266 @@ EOF
         esac
         ;;
 esac
+
+# ---- Second gate: destination allowlist -------------------------------------
+# ALLOW_REMOTE_GIT is binary — once it is 1, every remote is reachable. That is
+# fine for a human at a keyboard and wrong for an unattended agent, which needs
+# remote git enabled but must only ever touch a sandbox.
+#
+# GIT_REMOTE_ALLOWLIST narrows the *destination*: a whitespace- or
+# comma-separated list of `host/path` prefixes. Unset or empty means no
+# restriction, so existing setups are unaffected.
+#
+#   GIT_REMOTE_ALLOWLIST="gitlab.internal.example/symphony-sandbox/"
+#
+# SCOPE — read this before relying on it. This is defence in depth, NOT a
+# security boundary. The agent has an unrestricted bash tool and can call
+# /usr/bin/git directly, straight past this PATH shim. Its job is to turn a
+# mistake — a hallucinated remote, a stale branch config, a pasted URL — into a
+# legible local error instead of a confusing 403 from the server. The real
+# boundary is the credential: a GitLab group access token scoped to the sandbox
+# group, enforced server-side. See docs/SYMPHONY.md.
+
+# real_git <args...> — run the real git with the SAME global options the caller
+# used. `git -C /other/repo push origin` must resolve `origin` in /other/repo,
+# not in the current directory, or the check reads a different repo's remotes
+# than the command will actually push to. args[0..sub_idx-1] is exactly the
+# global-option run that find_subcommand already walked past.
+real_git() {
+    if [ "${sub_idx}" -gt 0 ]; then
+        "${REAL_GIT}" "${args[@]:0:${sub_idx}}" "$@"
+    else
+        "${REAL_GIT}" "$@"
+    fi
+}
+
+# normalize_remote <url|remote-name> — reduce a git remote to `host/path` for
+# comparison: drop scheme, userinfo, port, trailing `.git`. Handles both URL
+# and scp-like (`git@host:group/repo`) syntax. Local paths pass through.
+normalize_remote() {
+    local url="${1}" host rest
+    url="${url%%\?*}"
+    case "${url}" in
+        *://*)
+            url="${url#*://}"
+            url="${url#*@}"
+            host="${url%%/*}"
+            rest=""
+            case "${url}" in */*) rest="/${url#*/}" ;; esac
+            host="${host%%:*}"
+            url="${host}${rest}"
+            ;;
+        /*|./*|../*|~*)
+            ;;                                  # local path; left alone
+        *:*)
+            url="${url#*@}"
+            url="${url%%:*}/${url#*:}"
+        ;;
+    esac
+    url="${url#/}"
+    url="${url%/}"
+    url="${url%.git}"
+    printf '%s' "${url}"
+}
+
+# resolve_remote_url <remote-name-or-url> — turn whatever the user typed into
+# the URL git would actually contact. An empty argument means git picks the
+# default, so mirror that lookup. A name that does not resolve is returned
+# unchanged, which then fails the allowlist — the safe direction.
+resolve_remote_url() {
+    local ref="${1}" branch
+    if [ -z "${ref}" ]; then
+        branch="$(real_git symbolic-ref --short -q HEAD 2>/dev/null || true)"
+        [ -n "${branch}" ] && ref="$(real_git config --get "branch.${branch}.remote" 2>/dev/null || true)"
+        [ -z "${ref}" ] && ref="origin"
+    fi
+    case "${ref}" in
+        *://*|/*|./*|../*|~*) printf '%s' "${ref}"; return 0 ;;
+        *@*:*)                printf '%s' "${ref}"; return 0 ;;
+    esac
+    real_git remote get-url "${ref}" 2>/dev/null || printf '%s' "${ref}"
+}
+
+# remote_allowed <url> — prefix-match the normalized destination against each
+# allowlist entry, on a path-segment boundary so `…/sandbox` cannot be
+# satisfied by `…/sandbox-evil`.
+remote_allowed() {
+    local target entry
+    target="$(normalize_remote "${1}")"
+    [ -z "${target}" ] && return 1
+    for entry in ${GIT_REMOTE_ALLOWLIST//,/ }; do
+        entry="$(normalize_remote "${entry}")"
+        [ -z "${entry}" ] && continue
+        case "${target}/" in
+            "${entry}"/*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+deny_remote() {
+    cat >&2 <<EOF
+git ${sub}: destination not in GIT_REMOTE_ALLOWLIST.
+
+  requested: ${1}
+  allowed:   ${GIT_REMOTE_ALLOWLIST}
+
+This container is restricted to the sandbox remotes listed above. Widen
+GIT_REMOTE_ALLOWLIST in .env only if you mean to.
+EOF
+    exit 1
+}
+
+# find_opt_value <--opt> <from-index> — value of an option that git's
+# parse-options accepts in either `--opt=value` or `--opt value` form. Sets
+# REPLY to the value and returns 0 on a hit; REPLY="" and 1 otherwise.
+find_opt_value() {
+    local want="$1" i="$2" tok
+    while [ "${i}" -lt "${argc}" ]; do
+        tok="${args[${i}]}"
+        case "${tok}" in
+            "${want}"=*)
+                REPLY="${tok#*=}"
+                return 0 ;;
+            "${want}")
+                if [ $((i + 1)) -lt "${argc}" ]; then
+                    REPLY="${args[$((i + 1))]}"
+                    return 0
+                fi
+                ;;
+        esac
+        i=$((i + 1))
+    done
+    REPLY=""
+    return 1
+}
+
+# has_flag <--flag> <from-index> — is this exact bare flag present?
+has_flag() {
+    local want="$1" i="$2"
+    while [ "${i}" -lt "${argc}" ]; do
+        [ "${args[${i}]}" = "${want}" ] && return 0
+        i=$((i + 1))
+    done
+    return 1
+}
+
+# add_all_remotes — every remote configured in this repo. The commands that
+# contact more than one destination per invocation need all of them checked,
+# not just whichever git would have picked by default.
+add_all_remotes() {
+    local r
+    while IFS= read -r r; do
+        [ -n "${r}" ] && targets+=("${r}")
+    done < <(real_git remote 2>/dev/null || true)
+}
+
+# add_remote_or_group <name> — `remotes.<name>` in the config is a GROUP: one
+# name standing for several remotes. Expand it, or fall through to the name
+# itself when no such group exists.
+add_remote_or_group() {
+    local name="$1" members r
+    members="$(real_git config --get-all "remotes.${name}" 2>/dev/null || true)"
+    if [ -n "${members}" ]; then
+        for r in ${members}; do
+            targets+=("${r}")
+        done
+    else
+        targets+=("${name}")
+    fi
+}
+
+if [ -n "${GIT_REMOTE_ALLOWLIST:-}" ]; then
+    # Every destination this invocation could contact. One empty element means
+    # "none was named, so check whatever git would resolve by default"; an empty
+    # ARRAY means nothing will be contacted at all and there is nothing to gate.
+    targets=()
+    idx=0
+
+    case "${sub}" in
+        clone)
+            # first non-option token after `clone` is the URL
+            if find_subcommand $((sub_idx + 1)); then
+                targets+=("${args[${REPLY}]}")
+            else
+                targets+=("")
+            fi
+            ;;
+        push)
+            # `--repo=<url>` is a destination in its own right — git falls back
+            # to it when no repository is named positionally — and it is written
+            # as a joined long option, which the scanner above skips as one
+            # token. Left unread it walked straight past this gate.
+            if find_opt_value --repo $((sub_idx + 1)); then
+                targets+=("${REPLY}")
+            fi
+            if find_subcommand $((sub_idx + 1)); then
+                targets+=("${args[${REPLY}]}")
+            fi
+            # Note: `push --all` means all BRANCHES, not all remotes.
+            [ "${#targets[@]}" -gt 0 ] || targets+=("")
+            ;;
+        fetch)
+            # `--all` contacts every configured remote and `--multiple` reads
+            # every positional as one, so checking a single token would wave the
+            # rest through.
+            if has_flag --all $((sub_idx + 1)); then
+                add_all_remotes
+            elif has_flag --multiple $((sub_idx + 1)); then
+                idx=$((sub_idx + 1))
+                while find_subcommand "${idx}"; do
+                    add_remote_or_group "${args[${REPLY}]}"
+                    idx=$((REPLY + 1))
+                done
+            elif find_subcommand $((sub_idx + 1)); then
+                targets+=("${args[${REPLY}]}")
+            else
+                targets+=("")
+            fi
+            ;;
+        pull|ls-remote)
+            # optional; absent means git resolves the default remote
+            if find_subcommand $((sub_idx + 1)); then
+                targets+=("${args[${REPLY}]}")
+            else
+                targets+=("")
+            fi
+            ;;
+        remote)
+            case "${subsub}" in
+                # `remote add <name> <url>` / `remote set-url [--add] <name> <url>`
+                add|set-url)
+                    if find_subcommand $((sub_idx + 1)) \
+                        && find_subcommand $((REPLY + 1)) \
+                        && find_subcommand $((REPLY + 1)); then
+                        targets+=("${args[${REPLY}]}")
+                    fi
+                    ;;
+                # `remote update [<group|remote>...]` — bare, it updates every
+                # remote; named, each argument may itself be a group.
+                update)
+                    # From after `update` itself, not after `remote` — the
+                    # subcommand token is not one of its arguments.
+                    idx=$((subsub_idx + 1))
+                    if find_subcommand "${idx}"; then
+                        while find_subcommand "${idx}"; do
+                            add_remote_or_group "${args[${REPLY}]}"
+                            idx=$((REPLY + 1))
+                        done
+                    else
+                        add_all_remotes
+                    fi
+                    ;;
+            esac
+            ;;
+    esac
+
+    # Zero targets is the "nothing will be contacted" case (`fetch --all` in a
+    # repo with no remotes); the loop then correctly checks nothing.
+    for target_ref in ${targets[@]+"${targets[@]}"}; do
+        resolved="$(resolve_remote_url "${target_ref}")"
+        remote_allowed "${resolved}" || deny_remote "${resolved}"
+    done
+fi
 
 exec "${REAL_GIT}" "$@"

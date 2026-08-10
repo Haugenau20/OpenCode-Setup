@@ -14,6 +14,9 @@
     {"key": "GITLAB_BASE_URL", "required": false},
     {"key": "GITLAB_USER", "required": false},
     {"key": "GITLAB_PAT", "required": false},
+    {"key": "ALLOW_GITLAB_WRITE", "required": false},
+    {"key": "GITLAB_WRITE_PROJECTS", "required": false},
+    {"key": "GITLAB_QUEUE_LABEL_PREFIX", "required": false},
     {"key": "JFROG_BASE_URL", "required": false},
     {"key": "JFROG_PAT", "required": false},
     {"key": "CONFLUENCE_BASE_URL", "required": false},
@@ -23,6 +26,7 @@
     {"key": "GIT_USER_NAME", "required": false},
     {"key": "GIT_USER_EMAIL", "required": false},
     {"key": "ALLOW_REMOTE_GIT", "required": false},
+    {"key": "GIT_REMOTE_ALLOWLIST", "required": false},
     {"key": "ALLOW_CONFLUENCE_WRITE", "required": false},
     {"key": "DISABLE_BITBUCKET_MCP", "required": false},
     {"key": "DISABLE_JIRA_MCP", "required": false},
@@ -34,6 +38,18 @@
     {"key": "HOST_UID", "required": false},
     {"key": "HOST_GID", "required": false}
   ],
-  "mcps": ["bitbucket", "gitlab", "jira", "jfrog", "confluence", "mfiles"],
-  "plugins": ["superpowers", "dcp", "opencode-workspace", "opencode-pty"]
+  "mcps": [
+    "bitbucket",
+    "gitlab",
+    "jira",
+    "jfrog",
+    "confluence",
+    "mfiles"
+  ],
+  "plugins": [
+    "superpowers",
+    "dcp",
+    "opencode-workspace",
+    "opencode-pty"
+  ]
 }
