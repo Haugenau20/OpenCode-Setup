@@ -188,6 +188,26 @@ shell_files() {
   done
 }
 
+# doctor.sh reports which side of the write gate each MCP is on. The two blocks
+# are SIBLINGS: they belong to different servers with different credentials, and
+# a symphony deployment is GitLab-only. Nested inside the Confluence guard — one
+# missing `fi`, which is valid shell and reads fine in a diff — the GitLab report
+# silently disappears from exactly the stack that most needs it.
+@test "doctor.sh: the GitLab write-gate report is not nested inside the Confluence one" {
+  local conf gl between
+  conf="$(grep -n 'CONFLUENCE_BASE_URL:-' "$REPO_ROOT/scripts/doctor.sh" | tail -1 | cut -d: -f1)"
+  gl="$(grep -n 'GITLAB_BASE_URL:-' "$REPO_ROOT/scripts/doctor.sh" | tail -1 | cut -d: -f1)"
+  [ -n "$conf" ] && [ -n "$gl" ] && [ "$conf" -lt "$gl" ]
+  # The Confluence block must be closed at its own indentation before the
+  # GitLab one opens.
+  between="$(sed -n "$((conf + 1)),$((gl - 1))p" "$REPO_ROOT/scripts/doctor.sh" | grep -cE '^    fi$')"
+  [ "$between" -ge 1 ] || {
+    echo "no sibling-level 'fi' between the Confluence and GitLab write-gate blocks" >&2
+    echo "the GitLab report only runs when Confluence credentials are present" >&2
+    return 1
+  }
+}
+
 # --- .env.example <-> symphony/.env.example split ----------------------------
 #
 # docker-compose.yml gives the opencode service `env_file: - .env`, so every key

@@ -223,7 +223,11 @@ if docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
         else
             ok "confluence: read-only (set ALLOW_CONFLUENCE_WRITE=1 in .env to allow page writes)"
         fi
+    fi
 
+    # Independent of the Confluence block above: the two write planes are
+    # separate MCPs with separate credentials, and a GitLab-only stack — which
+    # is what a symphony deployment is — has no Confluence keys at all.
     if [ -n "${GITLAB_BASE_URL:-}" ] && [ -n "${GITLAB_PAT:-}" ] \
         && [ "${DISABLE_GITLAB_MCP:-0}" != "1" ]; then
         if [ "${ALLOW_GITLAB_WRITE:-0}" = "1" ]; then
@@ -236,7 +240,6 @@ if docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
         else
             ok "gitlab: read-only (set ALLOW_GITLAB_WRITE=1 in .env to allow writes)"
         fi
-    fi
     fi
 else
     warn "stack not running — skipping MCP checks"
