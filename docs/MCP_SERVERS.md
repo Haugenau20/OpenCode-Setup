@@ -323,7 +323,7 @@ verification.
   "what changed in this MR" or "read this file from GitLab" requests. It also
   covers issues (`list_issues`, `get_issue`, `get_issue_notes`) and CI status
   (`get_pipelines`), and — only when writes are enabled, see below — opening
-  merge requests and posting comments during unattended symphony runs.
+  merge requests and posting comments.
 - The **`/sync-jira`** command resolves the issue key from the current branch (or
   an argument) and pulls the ticket into context via `get_issue`.
 - The **`jfrog-fetch`** skill drives the JFrog tools for artifact/dependency
@@ -364,9 +364,9 @@ ALLOW_GITLAB_WRITE=1
 GITLAB_WRITE_PROJECTS=mygroup/my-sandbox-project
 ```
 
-This exists for unattended [symphony](SYMPHONY.md) runs, where the agent has to
-open merge requests and answer review comments with nobody at the keyboard. For
-ordinary interactive use leave it `0` — you are at the keyboard.
+This exists so the agent can publish its own work — open a merge request, answer
+review comments — rather than dictating it to you. For ordinary interactive use
+leave it `0`; you are at the keyboard and can do it yourself.
 
 With the switch on, the server additionally offers `create_merge_request`,
 `update_merge_request`, `create_mr_note`, `create_issue`, `create_issue_note`
@@ -381,18 +381,22 @@ the model at all, *and* every write handler re-checks before acting. Listing is
 not enforcement — a client can call a tool it was never offered.
 
 **What stays impossible even at `=1`:** setting an issue's labels, closing or
-reopening an issue, and merging an MR. In the symphony workflow an issue's
-`symphony::` label *is* its workflow state and the orchestrator owns every
-transition; an agent able to relabel its own issue could mark its work reviewed,
-or file itself unbounded new work. `create_issue` refuses labels in that reserved
-namespace (`GITLAB_QUEUE_LABEL_PREFIX`, default `symphony`), so a follow-up the
-agent files arrives unlabelled and a human decides whether it enters the queue.
+reopening an issue, and merging an MR. Where an external orchestrator drives work
+through issue labels, a reserved `<prefix>::` label *is* the workflow state and
+that orchestrator owns every transition; an agent able to relabel its own issue
+could mark its work reviewed, or file itself unbounded new work. `create_issue`
+refuses labels in the reserved namespace (`GITLAB_QUEUE_LABEL_PREFIX`, default
+`symphony`), so a follow-up the agent files arrives unlabelled and a human
+decides whether it enters the queue. Nothing in this repo consumes those labels
+— the gate is here because the image is what an orchestrator drives, and a
+default that matched nothing would protect nobody.
 
 As with `GIT_REMOTE_ALLOWLIST`, this is defence in depth rather than a boundary:
 the agent has a shell and a token and can call the REST API directly. What it
 buys is that write capability is off unless someone deliberately enabled it, and
 that the tools offered match what the deployment intends. The boundary is the
-token — its project scope and its role.
+token — its project scope and its role. See [`ARCHITECTURE.md`](ARCHITECTURE.md),
+"The credential model".
 
 The gating logic lives in `opencode/mcp-servers/_lib/write_gate.js`, which is
 dependency-free (so it is unit-testable without any server's `node_modules`) and

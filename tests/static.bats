@@ -190,9 +190,9 @@ shell_files() {
 
 # doctor.sh reports which side of the write gate each MCP is on. The two blocks
 # are SIBLINGS: they belong to different servers with different credentials, and
-# a symphony deployment is GitLab-only. Nested inside the Confluence guard — one
-# missing `fi`, which is valid shell and reads fine in a diff — the GitLab report
-# silently disappears from exactly the stack that most needs it.
+# a GitLab-only stack has no Confluence keys at all. Nested inside the Confluence
+# guard — one missing `fi`, which is valid shell and reads fine in a diff — the
+# GitLab report silently disappears from exactly the stack that most needs it.
 @test "doctor.sh: the GitLab write-gate report is not nested inside the Confluence one" {
   local conf gl between
   conf="$(grep -n 'CONFLUENCE_BASE_URL:-' "$REPO_ROOT/scripts/doctor.sh" | tail -1 | cut -d: -f1)"
@@ -206,56 +206,6 @@ shell_files() {
     echo "the GitLab report only runs when Confluence credentials are present" >&2
     return 1
   }
-}
-
-# --- .env.example <-> symphony/.env.example split ----------------------------
-#
-# docker-compose.yml gives the opencode service `env_file: - .env`, so every key
-# in the root .env is an environment variable the AGENT can read. Symphony's
-# tracker token must not be one of them. The split is only worth anything if it
-# stays split, and adding a key back is a one-line edit nobody would flag.
-
-@test ".env.example: no SYMPHONY_ key is in the root file" {
-  local found
-  found="$(grep -E '^SYMPHONY_[A-Z_]+=' "$REPO_ROOT/.env.example" || true)"
-  [ -z "$found" ] || {
-    echo "SYMPHONY_ keys belong in symphony/.env.example — the root .env is passed" >&2
-    echo "into the agent's container via env_file. Found:" >&2
-    printf '  %s\n' "$found" >&2
-    return 1
-  }
-}
-
-@test "symphony/.env.example: every key it ships is read by the overlay or the launcher" {
-  local key unused=""
-  while IFS= read -r key; do
-    [ -n "$key" ] || continue
-    grep -qF "$key" "$REPO_ROOT/docker-compose.symphony.yml" \
-      || grep -qF "$key" "$REPO_ROOT/docker-compose.symphony-dev.yml" \
-      || grep -qF "$key" "$REPO_ROOT/scripts/symphony" \
-      || unused="${unused}${key} "
-  done < <(grep -oE '^SYMPHONY_[A-Z_]+' "$REPO_ROOT/symphony/.env.example")
-  [ -z "$unused" ] || {
-    echo "keys in symphony/.env.example that nothing reads: $unused" >&2
-    return 1
-  }
-}
-
-@test "symphony image ref is pinned, not a branch" {
-  # A build from a moving branch is not reproducible, which is the whole reason
-  # the arg exists. Both the shipped value and the compose fallback must be a
-  # tag or a full SHA.
-  local shipped fallback
-  shipped="$(grep -E '^SYMPHONY_REF=' "$REPO_ROOT/symphony/.env.example" | cut -d= -f2)"
-  fallback="$(grep -oE 'SYMPHONY_REF:-[^}]*' "$REPO_ROOT/docker-compose.symphony.yml" | cut -d- -f2-)"
-  for ref in "$shipped" "$fallback"; do
-    [ -n "$ref" ] || { echo "no SYMPHONY_REF found" >&2; return 1; }
-    case "$ref" in
-      v[0-9]*) ;;
-      [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;;
-      *) echo "SYMPHONY_REF '$ref' is not a tag or a SHA" >&2; return 1 ;;
-    esac
-  done
 }
 
 # --- JSON files parse ----------------------------------------------------------
@@ -317,43 +267,43 @@ shell_files() {
 }
 
 @test "gitlab MCP: no write tool mutates issue labels or state" {
-  # In the symphony workflow the label IS the workflow state and the
-  # orchestrator owns every transition. An agent able to relabel its own issue
-  # could mark its work reviewed, or feed itself work forever. Merging is a
-  # human decision. Neither capability may appear here.
+  # Where an external orchestrator drives work through issue labels, the label
+  # IS the workflow state and that orchestrator owns every transition. An agent
+  # able to relabel its own issue could mark its work reviewed, or feed itself
+  # work forever. Merging is a human decision. Neither may appear here.
   src="$REPO_ROOT/opencode/mcp-servers/gitlab/index.js"
   ! grep -qE 'state_event|"PUT", `/projects/\$\{encodeProjectId\(project\)\}/issues/\$\{issueIid\}`' "$src"
   ! grep -q '/merge_requests/${mrIid}/merge' "$src"
 }
 
-@test "symphony overlay: the agent's workspace root is pre-approved for external access" {
-  # opencode's permission.external_directory defaults to "ask". Symphony's
-  # workspaces live outside the /workspace project root, so without this the
-  # first file operation of an unattended run blocks on a prompt nobody can
-  # answer. Guards against the mount and the permission drifting apart.
-  overlay="$REPO_ROOT/docker-compose.symphony.yml"
-  [ -f "$overlay" ] || skip "symphony overlay not present"
-  grep -q 'OPENCODE_EXTRA_ALLOWED_DIRS: /workspaces/\*\*' "$overlay"
-  grep -q ':/workspaces:z' "$overlay"
+@test "the reserved label prefix keeps its shipped default" {
+  # GITLAB_QUEUE_LABEL_PREFIX's default is a contract with whatever orchestrator
+  # drives this image's issues: change the value and the gate silently stops
+  # matching for everyone who never set the variable, which is the failure mode
+  # a reserved namespace exists to prevent. Change it only deliberately, with a
+  # CHANGELOG entry telling consumers to set it explicitly.
+  grep -qx 'GITLAB_QUEUE_LABEL_PREFIX=symphony' "$REPO_ROOT/.env.example"
+  grep -qF 'process.env.GITLAB_QUEUE_LABEL_PREFIX || "symphony"' \
+    "$REPO_ROOT/opencode/mcp-servers/gitlab/index.js"
 }
 
-# --- the per-project compose contract ----------------------------------------
-# These three variables ARE the multi-project interface. scripts/opencode and
-# scripts/symphony are one implementation of it; opencode-launcher is the
-# user-facing one and has to set the same things. Documented in
-# docs/MULTI_PROJECT.md — if a name changes here, it changes there too.
+# --- the compose env/allowlist hooks -----------------------------------------
+# PROJECT_ENV_FILE and EXTRA_ALLOWLIST_PATH are launcher-facing hooks: nothing
+# in this repo sets either, and both default to the single-stack behaviour. They
+# exist so a launcher managing several stacks can give one its own credentials
+# and its own egress surface without forking this compose file.
 
-@test "docker-compose.yml layers a per-project env file over the root .env" {
-  # Without this the container gets the shared .env only, and per-project
-  # credentials — the whole reason a project has its own file — never arrive.
+@test "docker-compose.yml layers an optional env file over the root .env" {
+  # Without this a launcher-managed stack gets the shared .env only, and its own
+  # scoped credentials — the whole reason it has a second file — never arrive.
   grep -q 'PROJECT_ENV_FILE' "$REPO_ROOT/docker-compose.yml"
-  # required:false keeps the single-project case working with no such file.
+  # required:false keeps the single-stack case working with no such file.
   grep -qE 'required:[[:space:]]*false' "$REPO_ROOT/docker-compose.yml"
 }
 
-@test "the per-project env layer comes AFTER the root .env" {
+@test "the optional env layer comes AFTER the root .env" {
   # env_file is last-wins, so the order is the whole mechanism. Reversed, the
-  # shared file would override every project.
+  # shared file would override every stack.
   # The `path:` entry, not the comment above it that also names the variable.
   root_line="$(grep -n '^      - \.env$' "$REPO_ROOT/docker-compose.yml" | head -1 | cut -d: -f1)"
   proj_line="$(grep -n '^      - path: \${PROJECT_ENV_FILE' "$REPO_ROOT/docker-compose.yml" | head -1 | cut -d: -f1)"
@@ -361,50 +311,25 @@ shell_files() {
   [ "$root_line" -lt "$proj_line" ]
 }
 
-@test "the squid allowlist directory is overridable per project" {
-  # docs/SYMPHONY.md §3 tells a symphony stack to trim its egress surface. That
-  # is not expressible while every stack shares one directory.
+@test "the squid allowlist directory is overridable" {
+  # A stack that should reach only the LLM endpoint and one git host cannot trim
+  # its egress while every stack shares one allowlist directory.
   grep -q 'EXTRA_ALLOWLIST_PATH' "$REPO_ROOT/docker-compose.yml"
 }
 
-@test "no env_file directive names symphony's settings" {
-  # The agent/launcher split: symphony's tracker token must never be in a file
-  # handed to the agent's container. Only .env and PROJECT_ENV_FILE may appear.
-  bad="$(grep -nE '^\s+-\s+.*symphony.*\.env' "$REPO_ROOT/docker-compose.yml" || true)"
-  if [ -n "$bad" ]; then
-    echo "docker-compose.yml names a symphony env file in env_file: $bad" >&2
-    return 1
-  fi
-}
-
-@test "both launchers set PROJECT_ENV_FILE when a project is selected" {
-  for f in "$REPO_ROOT/scripts/opencode" "$REPO_ROOT/scripts/symphony"; do
-    grep -q 'PROJECT_ENV_FILE' "$f" || { echo "$f never sets PROJECT_ENV_FILE" >&2; return 1; }
-  done
-}
-
-@test "both launchers pass -p so two stacks are separate to compose" {
-  # Container names are slug-suffixed already, but without a compose project
-  # name `up` on one stack treats the other's containers as orphans.
-  for f in "$REPO_ROOT/scripts/opencode" "$REPO_ROOT/scripts/symphony"; do
-    grep -qE '\-p "opencode-\$\{PROJECT_SLUG' "$f" || { echo "$f does not pass -p" >&2; return 1; }
-  done
-}
-
-@test "symphony overlay: the unattended stack does not mount the developer's repo" {
-  # /workspace is opencode's PROJECT ROOT, so unlike /workspaces it sits behind
-  # no permission gate. Under symphony nobody is watching, and the agent never
-  # reads it anyway — it clones each item fresh into /workspaces/<item>. The
-  # overlay must therefore REPLACE the base stack's ${REPO_PATH}:/workspace bind
-  # (compose merges volumes by target) rather than inherit it.
-  overlay="$REPO_ROOT/docker-compose.symphony.yml"
-  [ -f "$overlay" ] || skip "symphony overlay not present"
-  grep -q ':/workspace$' "$overlay" \
-    || { echo "overlay does not override the /workspace mount" >&2; return 1; }
-  # And it must not be a host path — a bind here would just move the exposure.
-  bad="$(grep -E '^\s+-\s+\$\{REPO_PATH.*:/workspace' "$overlay" || true)"
-  if [ -n "$bad" ]; then
-    echo "overlay still binds a host repo at /workspace: $bad" >&2
-    return 1
-  fi
+@test "env_file names only the root .env and the optional layer" {
+  # This directive IS the agent's environment: every key in a file named here is
+  # readable by the agent. A credential belonging to some other container must
+  # never arrive through it, so the list stays closed to these two entries.
+  local entries line
+  entries="$(awk '/^    env_file:/{f=1;next} /^    [a-z]/{f=0} f && /^      - /' \
+    "$REPO_ROOT/docker-compose.yml")"
+  [ -n "$entries" ] || { echo "no env_file entries found" >&2; return 1; }
+  while IFS= read -r line; do
+    case "$line" in
+      '      - .env') ;;
+      '      - path: ${PROJECT_ENV_FILE:-.env}') ;;
+      *) echo "unexpected env_file entry: $line" >&2; return 1 ;;
+    esac
+  done <<< "$entries"
 }

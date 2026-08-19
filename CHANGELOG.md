@@ -27,7 +27,72 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
-## [0.3.0] — 2026-08-10
+## [0.4.0] — 2026-08-19
+
+**Action required:** re-pull image. Nothing to edit unless you were running
+0.3.0 — see the withdrawal note under that version below.
+
+### Removed
+- **Symphony.** The unattended orchestrator, its compose overlays, its image
+  build, its launcher and its documentation are gone from this repository.
+  Symphony is developed in its own two repositories and has been for some time;
+  what lived here was an earlier copy that the live versions had long overtaken,
+  so nothing was migrated — this is a deletion, not a move.
+
+  Gone: `symphony/`, `docker-compose.symphony.yml`,
+  `docker-compose.symphony-dev.yml`, `scripts/symphony`, `docs/SYMPHONY.md`,
+  and `tests/symphony-launcher.bats`.
+
+  `scripts/release.sh` now builds **two** images rather than three. The
+  `-symphony` image is built by the orchestrator's own repository, under the
+  same name and tag, so nothing that consumes it changes; `--symphony-only`,
+  `SYMPHONY_REF` and `SYMPHONY_REPO` no longer exist here.
+
+- **Per-project stacks under `projects/`.** Introduced in 0.3.0 and removed
+  with the same release that motivated them. `projects/`, `docs/MULTI_PROJECT.md`
+  and the `-p <slug>` flag are gone, and `scripts/new-project.sh` is back to
+  scaffolding a sibling checkout — the 0.2.0 model, which is what everyone is
+  actually running.
+
+  The two compose hooks the model rested on, `PROJECT_ENV_FILE` and
+  `EXTRA_ALLOWLIST_PATH`, **stay**. Nothing in this repo sets either and both
+  default to the single-stack behaviour, so they cost nothing; they remain
+  available to a launcher that manages several stacks and wants to give one its
+  own credentials or its own egress surface.
+
+### Kept, with the symphony framing removed
+Everything 0.3.0 added to the image itself survives. It arrived alongside
+symphony but none of it is symphony, and all of it is off by default:
+
+- The GitLab MCP write surface (`ALLOW_GITLAB_WRITE`, `GITLAB_WRITE_PROJECTS`),
+  the `gitlab-write` skill, and `opencode/mcp-servers/_lib/write_gate.js`.
+- `GIT_REMOTE_ALLOWLIST` in git-guard, now documented in
+  `docs/ALLOWING_GIT_PUSH.md` where it should have been from the start.
+- The write-plane reporting in the entrypoint and `scripts/doctor.sh`, and the
+  `OPENCODE_INTERNAL_PORT` / `EXTRA_ALLOWLIST_PATH` variables.
+
+`GITLAB_QUEUE_LABEL_PREFIX` keeps its default of `symphony`. It is the reserved
+issue-label namespace the MCP refuses to write, and the value is a contract with
+whatever orchestrator drives a stack's issues — changing it would silently stop
+the gate matching for anyone who never set the variable. `tests/static.bats`
+now pins it.
+
+### Changed
+- `docs/SYMPHONY.md` §1–§3 was the only in-repo statement of the credential
+  model, and retained code cited it. That argument — the scoped token is the
+  boundary, credential absence removes capability, the two gates are defence in
+  depth and not boundaries — now lives in `docs/ARCHITECTURE.md` under **The
+  credential model**, written without reference to any orchestrator. Every
+  inbound link points there.
+
+## [0.3.0] — 2026-08-10 — WITHDRAWN
+
+> [!WARNING]
+> **Do not use 0.3.0.** It was tagged and pushed but never announced, and
+> `latest` was never moved to it. Everything it added that was worth keeping is
+> in 0.4.0 above, without symphony; everything else it added has been removed.
+> Go from 0.2.0 straight to 0.4.0. The entry below is left as written, for the
+> record.
 
 **Action required:** re-pull image + edit .env (new opt-in switches:
 `ALLOW_CONFLUENCE_WRITE`, `ALLOW_GITLAB_WRITE`, `GIT_REMOTE_ALLOWLIST`,

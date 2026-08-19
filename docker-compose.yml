@@ -13,23 +13,24 @@ services:
     depends_on:
       - squid
     env_file:
-      # Two layers, last wins. The root .env holds what every project shares
-      # (LLM endpoint, image tag, git identity); the per-project file holds what
+      # Two layers, last wins. The root .env holds what every stack shares (LLM
+      # endpoint, image tag, git identity); an optional second file holds what
       # differs — above all the SCOPED credentials, since a project access token
       # is the containment boundary and by definition cannot be shared.
       #
-      # PROJECT_ENV_FILE is set by the launchers from `-p <slug>`; unset it
-      # defaults to .env, which is then read twice and changes nothing. That is
-      # the single-project case, unchanged.
+      # PROJECT_ENV_FILE is a hook for a launcher that manages several stacks;
+      # nothing in this repo sets it, and unset it defaults to .env, which is
+      # then read twice and changes nothing. That is the single-stack case, and
+      # it is what ./scripts/opencode does.
       #
-      # A per-project value may also BLANK an inherited one (`CONFLUENCE_PAT=`),
-      # which is how a symphony project keeps the "credential absence removes
-      # capability" property from docs/SYMPHONY.md §2 without the root .env
-      # having to be empty for everyone else.
+      # A second-layer value may also BLANK an inherited one (`CONFLUENCE_PAT=`),
+      # which is how one stack keeps the "credential absence removes capability"
+      # property (docs/ARCHITECTURE.md, "The credential model") without the root
+      # .env having to be empty for everyone else.
       #
-      # Note what is deliberately NOT here: symphony/.env and its per-project
-      # counterpart. This directive is the agent's environment, and symphony's
-      # tracker token has no business in it.
+      # Note what this directive is: the AGENT's environment. Every key in a file
+      # named here is readable by the agent, so a credential belonging to some
+      # other container must not be in one.
       - .env
       - path: ${PROJECT_ENV_FILE:-.env}
         required: false
@@ -47,11 +48,11 @@ services:
       NO_PROXY: "localhost,127.0.0.1,::1,opencode,squid,rag"
       no_proxy: "localhost,127.0.0.1,::1,opencode,squid,rag"
       # The in-container listen port. Everything that must agree on it — the
-      # oc-publish socat forwarder below, the symphony overlay's
-      # SYMPHONY_OPENCODE_URL — reads the same variable, so there is one place
-      # to change it. NOT OPENCODE_PORT: that is the HOST port, and the two are
-      # decoupled precisely so several stacks can differ on the host while all
-      # of them stay on 4096 inside.
+      # oc-publish socat forwarder below, and anything a launcher points at this
+      # service — reads the same variable, so there is one place to change it.
+      # NOT OPENCODE_PORT: that is the HOST port, and the two are decoupled
+      # precisely so several stacks can differ on the host while all of them
+      # stay on 4096 inside.
       OPENCODE_INTERNAL_PORT: "${OPENCODE_INTERNAL_PORT:-4096}"
       # opencode-pty viewer: force the plugin to bind non-loopback (so oc-publish
       # can reach it) and to a fixed, per-instance port DERIVED from OPENCODE_PORT
@@ -126,11 +127,10 @@ services:
       # Per-developer allowlist additions. Drop *.conf files into
       # ./extra-allowlist.d/ on the host (gitignored) and restart squid.
       #
-      # Per-project override: point EXTRA_ALLOWLIST_PATH at the project's own
-      # directory to give one stack a different egress surface. That is what
-      # docs/SYMPHONY.md §3 asks for — a symphony stack needs the LLM endpoint
-      # and GitLab and nothing else — and it was not expressible while every
-      # stack shared one directory.
+      # Override hook: point EXTRA_ALLOWLIST_PATH at a different directory to
+      # give one stack its own egress surface — a stack that needs only the LLM
+      # endpoint and one git host should not inherit everyone else's additions.
+      # Nothing in this repo sets it; unset, every stack shares the default dir.
       #
       # ro,z = read-only + shared SELinux relabel (z, not Z: the default dir is
       # mounted into every project's squid, so it must share one label).

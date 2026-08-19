@@ -70,22 +70,18 @@ If something doesn't work, run `./scripts/doctor.sh` first.
 
 ## Working on more than one repo
 
-One clone of this scaffold runs any number of stacks. Each repo gets a directory
-under `projects/` holding what differs — its port, its repo path, and above all
-its own credentials — layered on the root `.env`, which keeps what they share:
+Each repo gets its own clone of this scaffold and its own `.env` (different
+`PROJECT_SLUG` and `OPENCODE_PORT`):
 
 ```
 ./scripts/new-project.sh myservice ~/code/myservice
-$EDITOR projects/myservice/.env
-./scripts/opencode -p myservice
+cd ../OpenCode-Setup-myservice
+$EDITOR .env
+docker compose up -d
 ```
 
-`./scripts/symphony projects` lists what exists, on which port, and whether it
-is up. Without `-p` both launchers read the root `.env` only, which is exactly
-what a single-project setup did before `projects/` existed.
-
-The layering rules, and the contract a launcher has to implement to run one of
-these, are in [`docs/MULTI_PROJECT.md`](docs/MULTI_PROJECT.md).
+Compose project names, volume names, and the published port all derive from
+`PROJECT_SLUG`, so nothing collides.
 
 ## Extra context folders
 
@@ -188,25 +184,6 @@ more services) in [`docs/MCP_SERVERS.md`](docs/MCP_SERVERS.md).
 Drop a `*.conf` file into `extra-allowlist.d/` (gitignored) and
 `docker compose restart squid`. Same syntax as the shipped allowlist files
 under `squid/allowlist.d/`. You are responsible for what you add.
-
-## Symphony (opt-in, advanced)
-
-A different way of working: instead of you driving one session, an orchestrator
-watches a queue of work items and runs an agent per item, unattended, until each
-is ready for review. The queue is a directory tree — the folder a file sits in
-is its state, `mv` is how you move work, `ls` is the dashboard.
-
-It is off unless you add its compose overlay, and the base stack is unchanged
-while it is off. It runs agents without a human in the loop, so the setup is
-mostly about containment — chiefly a GitLab **group access token** scoped to a
-sandbox group, which is the only control here that holds server-side.
-
-Driven by `./scripts/symphony` (the counterpart to `./scripts/opencode`):
-`check` / `up` / `logs` / `status` / `add` / `stop`. Its settings live in
-`symphony/.env` — deliberately not the root `.env`, which is handed to the
-agent's container wholesale. Start with
-[`docs/SYMPHONY.md`](docs/SYMPHONY.md), including its staged rollout — stage 0
-needs no remote access at all.
 
 ## Architecture
 

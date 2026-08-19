@@ -100,22 +100,23 @@ esac
 
 # ---- Second gate: destination allowlist -------------------------------------
 # ALLOW_REMOTE_GIT is binary — once it is 1, every remote is reachable. That is
-# fine for a human at a keyboard and wrong for an unattended agent, which needs
-# remote git enabled but must only ever touch a sandbox.
+# fine for a human at a keyboard and too wide for a stack that needs remote git
+# enabled but should only ever touch one group.
 #
 # GIT_REMOTE_ALLOWLIST narrows the *destination*: a whitespace- or
 # comma-separated list of `host/path` prefixes. Unset or empty means no
 # restriction, so existing setups are unaffected.
 #
-#   GIT_REMOTE_ALLOWLIST="gitlab.internal.example/symphony-sandbox/"
+#   GIT_REMOTE_ALLOWLIST="gitlab.internal.example/my-group/"
 #
 # SCOPE — read this before relying on it. This is defence in depth, NOT a
 # security boundary. The agent has an unrestricted bash tool and can call
 # /usr/bin/git directly, straight past this PATH shim. Its job is to turn a
 # mistake — a hallucinated remote, a stale branch config, a pasted URL — into a
 # legible local error instead of a confusing 403 from the server. The real
-# boundary is the credential: a GitLab group access token scoped to the sandbox
-# group, enforced server-side. See docs/SYMPHONY.md.
+# boundary is the credential: a project or group access token scoped to what
+# the stack may reach, enforced server-side. See docs/ARCHITECTURE.md, "The
+# credential model".
 
 # real_git <args...> — run the real git with the SAME global options the caller
 # used. `git -C /other/repo push origin` must resolve `origin` in /other/repo,
