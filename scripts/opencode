@@ -20,22 +20,6 @@ load_env() {
     done < "${file}"
 }
 
-# --- project selection -------------------------------------------------------
-# `-p <slug>` picks a stack under projects/; everything after it is passed to
-# opencode itself, so `./scripts/opencode -p acme run "..."` works. Without -p
-# the root .env is the whole configuration, exactly as before.
-PROJECT="${OPENCODE_PROJECT:-}"
-while [ "$#" -gt 0 ]; do
-    case "$1" in
-        -p|--project)
-            [ "$#" -ge 2 ] || { echo "-p needs a project slug" >&2; exit 1; }
-            PROJECT="$2"; shift 2 ;;
-        -p=*|--project=*)
-            PROJECT="${1#*=}"; shift ;;
-        *) break ;;
-    esac
-done
-
 if [ ! -f .env ]; then
     echo "no .env found. Copy .env.example to .env and edit it first." >&2
     exit 1
@@ -43,34 +27,6 @@ fi
 
 # Load PROJECT_SLUG, OPENCODE_PORT, and USER_LAYER_PATH for messages / compose.
 load_env ./.env
-
-# Per-project layer. Same contract as scripts/symphony and the compose file:
-# projects/<slug>/.env is read after the root .env (last value wins), and
-# PROJECT_ENV_FILE is what carries it into the container via the `env_file:`
-# list in docker-compose.yml.
-COMPOSE_ENV_FILES=()
-if [ -n "${PROJECT}" ]; then
-    case "${PROJECT}" in
-        *[!A-Za-z0-9._-]*|.*|-*|"")
-            echo "invalid project slug: ${PROJECT}" >&2; exit 1 ;;
-    esac
-    PROJECT_DIR="./projects/${PROJECT}"
-    [ -d "${PROJECT_DIR}" ] || {
-        echo "no such project: ${PROJECT_DIR}" >&2
-        echo "  create it: ./scripts/new-project.sh ${PROJECT}" >&2
-        exit 1
-    }
-    export PROJECT_SLUG="${PROJECT}"
-    [ -d "${PROJECT_DIR}/allowlist.d" ] && export EXTRA_ALLOWLIST_PATH="${PROJECT_DIR}/allowlist.d"
-    if [ -f "${PROJECT_DIR}/.env" ]; then
-        load_env "${PROJECT_DIR}/.env"
-        export PROJECT_ENV_FILE="${PROJECT_DIR}/.env"
-        # Naming any --env-file disables compose's default ./.env discovery, so
-        # the root file has to be listed too.
-        COMPOSE_ENV_FILES=(--env-file .env --env-file "${PROJECT_DIR}/.env")
-    fi
-fi
-
 PROJECT_SLUG="${PROJECT_SLUG:-default}"
 OPENCODE_PORT="${OPENCODE_PORT:-4096}"
 CONTAINER="opencode-${PROJECT_SLUG}"
@@ -82,10 +38,7 @@ fi
 
 if ! docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
     echo "starting stack (project: ${PROJECT_SLUG})..."
-    # -p keeps two stacks separate objects to compose itself; without it, `up`
-    # on one treats the other's containers as orphans.
-    docker compose "${COMPOSE_ENV_FILES[@]:+${COMPOSE_ENV_FILES[@]}}" \
-        -p "opencode-${PROJECT_SLUG}" "${COMPOSE_FILES[@]}" up -d
+    docker compose "${COMPOSE_FILES[@]}" up -d
 fi
 
 echo "web UI: http://localhost:${OPENCODE_PORT}"

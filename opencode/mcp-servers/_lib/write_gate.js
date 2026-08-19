@@ -3,9 +3,9 @@
  *
  * The servers in this image were read-only by construction, which was a real
  * safety property: a compromised or confused agent could not change anything
- * in Bitbucket, Jira, GitLab or Confluence. Symphony needs that to stop being
- * absolutely true for GitLab — an unattended agent has to open merge requests
- * and answer review comments — so the property becomes conditional instead of
+ * in Bitbucket, Jira, GitLab or Confluence. Publishing work needs that to stop
+ * being absolutely true for GitLab — the agent has to open merge requests and
+ * answer review comments — so the property becomes conditional instead of
  * disappearing.
  *
  * Same shape as `ALLOW_REMOTE_GIT` in the git guard: a binary switch that is
@@ -90,10 +90,11 @@ export function assertWriteAllowed(service, project, env = process.env) {
 }
 
 /**
- * Labels the agent must never set. State in the symphony workflow IS a
- * `<prefix>::<state>` label, and the orchestrator owns every transition — an
- * agent that could relabel its own issue could mark its work reviewed, or
- * enqueue new work for itself in an unbounded loop.
+ * Labels the agent must never set. Where an external orchestrator drives work
+ * through issue labels, state IS a `<prefix>::<state>` label and that
+ * orchestrator owns every transition — an agent that could relabel its own
+ * issue could mark its work reviewed, or enqueue new work for itself in an
+ * unbounded loop.
  *
  * So the reserved namespace is refused at the tool boundary rather than merely
  * discouraged in a prompt. A follow-up issue the agent files is unlabelled and

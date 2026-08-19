@@ -27,17 +27,18 @@
  *   update_merge_request   — retitle / rewrite an MR description
  *   create_mr_note         — reply on a merge request
  *
- * The write surface exists for unattended (symphony) runs, where the agent has
- * to open MRs and answer review comments with no human at the keyboard. It is
- * OFF by default and gated twice: the tools are not listed unless the switch is
- * on, AND every write handler re-checks before acting, because a client can
- * call a tool it was never offered.
+ * The write surface exists so the agent can publish its work — open an MR,
+ * answer review comments — without a human relaying it by hand. It is OFF by
+ * default and gated twice: the tools are not listed unless the switch is on,
+ * AND every write handler re-checks before acting, because a client can call a
+ * tool it was never offered.
  *
  * What is deliberately NOT here, even with the switch on: anything that sets
- * issue labels or open/closed state, merges an MR, or deletes anything. In the
- * symphony workflow the label IS the state and the orchestrator owns it; an
- * agent able to relabel its own issue could mark its own work reviewed or feed
- * itself new work forever. Merging is a human decision. See docs/SYMPHONY.md.
+ * issue labels or open/closed state, merges an MR, or deletes anything. Where
+ * an external orchestrator drives work through issue labels, the label IS the
+ * state and that orchestrator owns it; an agent able to relabel its own issue
+ * could mark its own work reviewed or feed itself new work forever. Merging is
+ * a human decision. See docs/ARCHITECTURE.md, "The credential model".
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -79,7 +80,11 @@ const proxyAgent = makeDispatcher();
 // handler re-checks per call, since listing is not enforcement.
 const WRITES_ENABLED = writeEnabled("GITLAB");
 
-// Label namespace the agent may never set. Matches symphony's `label_prefix`.
+// Label namespace the agent may never set — reserved for whatever drives work
+// through issue labels. The default matches the `symphony::` prefix used by the
+// external orchestrator this gate was first written for; an orchestrator that
+// names its states differently sets GITLAB_QUEUE_LABEL_PREFIX to match. Changing
+// the default would silently stop the gate matching for anyone relying on it.
 const QUEUE_LABEL_PREFIX = process.env.GITLAB_QUEUE_LABEL_PREFIX || "symphony";
 
 // ---------------------------------------------------------------------------
