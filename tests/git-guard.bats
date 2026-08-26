@@ -258,9 +258,9 @@ run_guard() {
 # means the allowlist rejected the destination, which is a different message
 # from the ALLOW_REMOTE_GIT refusal above.
 
-SANDBOX_URL="https://gitlab.internal.example/symphony-sandbox/demo.git"
+SANDBOX_URL="https://gitlab.internal.example/my-group/demo.git"
 PROD_URL="https://gitlab.internal.example/production/payments.git"
-ALLOWLIST="gitlab.internal.example/symphony-sandbox/"
+ALLOWLIST="gitlab.internal.example/my-group/"
 
 # allow_guard [args...] — remote git enabled, allowlist set, run from $REPO.
 allow_guard() {
@@ -316,12 +316,12 @@ refused() {
 }
 
 @test "allowlist: scp-style inside the sandbox is permitted" {
-  allow_guard clone "git@gitlab.internal.example:symphony-sandbox/demo.git" "$BATS_TEST_TMPDIR/x"
+  allow_guard clone "git@gitlab.internal.example:my-group/demo.git" "$BATS_TEST_TMPDIR/x"
   [[ "$output" != *"not in GIT_REMOTE_ALLOWLIST"* ]]
 }
 
 @test "allowlist: prefix match respects path segments (sandbox-evil is refused)" {
-  allow_guard clone "https://gitlab.internal.example/symphony-sandbox-evil/x.git" "$BATS_TEST_TMPDIR/x"
+  allow_guard clone "https://gitlab.internal.example/my-group-evil/x.git" "$BATS_TEST_TMPDIR/x"
   refused
 }
 
@@ -348,7 +348,7 @@ refused() {
 
 @test "allowlist: remote set-url inside the sandbox is permitted" {
   git -C "$REPO" remote add origin "$SANDBOX_URL"
-  allow_guard remote set-url origin "https://gitlab.internal.example/symphony-sandbox/other.git"
+  allow_guard remote set-url origin "https://gitlab.internal.example/my-group/other.git"
   [ "$status" -eq 0 ]
 }
 
@@ -381,7 +381,7 @@ refused() {
 
 @test "allowlist: comma-separated entries are honoured" {
   ALLOW_REMOTE_GIT=1 \
-    GIT_REMOTE_ALLOWLIST="gitlab.internal.example/a/,gitlab.internal.example/symphony-sandbox/" \
+    GIT_REMOTE_ALLOWLIST="gitlab.internal.example/a/,gitlab.internal.example/my-group/" \
     run_guard clone "$SANDBOX_URL" "$BATS_TEST_TMPDIR/x"
   [[ "$output" != *"not in GIT_REMOTE_ALLOWLIST"* ]]
 }

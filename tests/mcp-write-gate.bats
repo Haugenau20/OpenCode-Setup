@@ -128,29 +128,29 @@ gate() {
 # unbounded new work. Refused at the tool boundary, not just in a prompt.
 
 @test "reserved labels are detected regardless of case or padding" {
-  gate "g.findReservedLabels(['bug','  Symphony::Todo  ','ok'], 'symphony')"
-  [ "$output" = '["  Symphony::Todo  "]' ]
+  gate "g.findReservedLabels(['bug','  Queue::Todo  ','ok'], 'queue')"
+  [ "$output" = '["  Queue::Todo  "]' ]
 }
 
 @test "a similarly-named label is not reserved" {
-  gate "g.findReservedLabels(['symphonic::todo','symphony-ish','symphony'], 'symphony')"
+  gate "g.findReservedLabels(['queueish::todo','queue-ish','queue'], 'queue')"
   [ "$output" = "[]" ]
 }
 
 @test "assertNoReservedLabels throws and explains who owns the namespace" {
-  gate "g.assertNoReservedLabels(['symphony::todo'], 'symphony')"
+  gate "g.assertNoReservedLabels(['queue::todo'], 'queue')"
   [[ "$output" == THREW:* ]]
-  [[ "$output" == *"symphony::todo"* ]]
+  [[ "$output" == *"queue::todo"* ]]
   [[ "$output" == *"orchestrator"* ]]
 }
 
 @test "assertNoReservedLabels permits ordinary labels" {
-  gate "(g.assertNoReservedLabels(['bug','priority::1'], 'symphony'), 'ok')"
+  gate "(g.assertNoReservedLabels(['bug','priority::1'], 'queue'), 'ok')"
   [ "$output" = '"ok"' ]
 }
 
 @test "assertNoReservedLabels tolerates undefined labels" {
-  gate "(g.assertNoReservedLabels(undefined, 'symphony'), 'ok')"
+  gate "(g.assertNoReservedLabels(undefined, 'queue'), 'ok')"
   [ "$output" = '"ok"' ]
 }
 

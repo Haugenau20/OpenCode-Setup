@@ -1,6 +1,6 @@
 ---
 name: gitlab-write
-description: "Creates and edits things in GitLab via the GitLab MCP write tools — opening and updating merge requests, commenting on merge requests and issues, keeping a single running workpad comment, and filing follow-up issues. Use when work needs to be published or handed to a human for review, especially in unattended symphony runs. Requires ALLOW_GITLAB_WRITE=1; the skill is absent otherwise."
+description: "Creates and edits things in GitLab via the GitLab MCP write tools — opening and updating merge requests, commenting on merge requests and issues, keeping a single running workpad comment, and filing follow-up issues. Use when work needs to be published or handed to a human for review. Requires ALLOW_GITLAB_WRITE=1; the skill is absent otherwise."
 ---
 
 # GitLab MCP — writing
@@ -54,7 +54,8 @@ token you are given cannot do it — a 403 on merge is expected, not a puzzle.
 ### What you cannot do, by design
 
 There is no tool to set an issue's labels, close or reopen an issue, or merge an
-MR. In the symphony workflow an issue's `symphony::` label **is** its workflow
-state and the orchestrator owns every transition. `gitlab_create_issue` refuses
-labels in that namespace, so a follow-up you file arrives unlabelled and a human
-decides whether it enters the queue. Do not try to work around this.
+MR. Where an external orchestrator drives work through issue labels, a reserved
+`<prefix>::` label **is** the workflow state and that orchestrator owns every
+transition. `gitlab_create_issue` refuses labels in the reserved namespace, so a
+follow-up you file arrives unlabelled and a human decides whether it enters the
+queue. Do not try to work around this.

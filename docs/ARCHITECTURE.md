@@ -264,12 +264,31 @@ By default `ALLOW_REMOTE_GIT=0` in `.env`. A shim at `/usr/local/bin/git`
 intercepts `push`, `fetch`, `pull`, `clone`, and `remote` and refuses unless
 the env var is `1`. Local commits, status, diff, log, etc. work normally.
 
+The switch is binary — once on, every remote is reachable.
+`GIT_REMOTE_ALLOWLIST` narrows the destination:
+
+```
+ALLOW_REMOTE_GIT=1
+GIT_REMOTE_ALLOWLIST=gitlab.internal.example/my-group/
+```
+
+Whitespace- or comma-separated `host/path` prefixes, matched on a path-segment
+boundary, so `…/my-group` is not satisfied by `…/my-group-evil`. It resolves
+named remotes through `git remote get-url`, normalizes scp-style
+`git@host:path`, ignores ports and userinfo, and honours `-C` / `--git-dir` so
+the remote is read from the repo the command will actually act on. An empty
+allowlist means "no restriction beyond the switch itself", which is the
+behaviour you get if you never set it.
+
 Bitbucket authentication for git uses a credential helper that reads
 `BITBUCKET_USER` and `BITBUCKET_PAT` from the environment. The PAT never
 touches disk inside the container.
 
 When the developer flips the switch, the shell prompt changes from
 `[oc:myrepo|git:ro]` to `[oc:myrepo|git:rw]` so the state is always visible.
+
+Neither the shim nor the allowlist is a security boundary — see
+[The credential model](#the-credential-model) below for what actually is.
 
 ## Secrets
 
@@ -279,10 +298,71 @@ gitignored; `.env.example` is the source of truth for the schema.
 
 `env_file` is all-or-nothing: the opencode service gets *every* key in `.env`,
 so that file is exactly "what the agent may read". Anything a different
-container needs and the agent must not see therefore cannot live there. The
-symphony overlay is the one case so far — its tracker token sits in
-`symphony/.env`, which only `./scripts/symphony` reads and no `env_file:`
-directive names. See [`SYMPHONY.md`](SYMPHONY.md).
+container needs and the agent must not see therefore cannot live there — it
+belongs in a file that no `env_file:` directive names, handed to its own
+service through that service's own `environment:` block.
+
+## The credential model
+
+Two switches in this image relax a default-off restriction:
+`ALLOW_REMOTE_GIT` (+ `GIT_REMOTE_ALLOWLIST`) on the git plane, and
+`ALLOW_<SERVICE>_WRITE` (+ `<SERVICE>_WRITE_PROJECTS`) on the MCP API plane.
+Both are useful and neither is load-bearing. This section says what is.
+
+### The scoped token is the boundary
+
+**Do not give the agent a personal access token.** A personal PAT carries your
+whole identity: every group, every production repo you can reach. Nothing in
+this container can claw that back, because the token *is* the authority.
+
+Prefer the narrowest thing that does the job:
+
+1. **A project access token**, when the stack works one project — the normal
+   case, since a GitLab project holds exactly one repository. Role
+   **Developer**, scopes `api` + `write_repository`. One project, one repo, one
+   issue tracker.
+2. **A group access token** over a dedicated group, only once you want several
+   repos under one credential. Same role and scopes.
+
+Either way every other project returns 404. Not "denied" — invisible. A
+confused agent, a hallucinated remote, a prompt injection out of an issue
+comment: all of them hit a server-side authorization check that does not read
+English.
+
+Be precise about what constrains what: **`api` is full API access for that
+project** — there is no issues-only scope. It is the **role** that stops a
+token pushing code. Effective permission is scope × role, so get the role
+right.
+
+Then, all free and server-side, in the project or group settings: protect
+`main` so no one may push and merges go through an MR; require at least one
+approval; grant Developer rather than Maintainer, so the token cannot change
+project settings or delete repos.
+
+### Credential absence removes capability
+
+Each MCP server in this image auto-enables on credential presence. A stack that
+should not reach Confluence does not disable the Confluence MCP — it leaves
+`CONFLUENCE_PAT` empty, and the server is then never wired into `opencode.json`
+at all. Not disabled: absent.
+
+This is why `.env.example` ships every credential key blank rather than
+omitting the ones you probably don't need. An empty value is how you say "not
+here".
+
+### The two gates are defence in depth, not boundaries
+
+`GIT_REMOTE_ALLOWLIST` and `<SERVICE>_WRITE_PROJECTS` both narrow *where* an
+enabled capability may act, using the same path-segment prefix rule so there is
+one thing to learn. Neither contains a determined agent: it has a shell and a
+token, and can call `/usr/bin/git` past the PATH shim or `curl` the API
+directly.
+
+What they buy is that write capability is off unless someone deliberately
+turned it on, that the tools the model is offered match what the deployment
+intends, and that a mistake — a stale branch config, a pasted URL, a
+hallucinated remote — becomes a legible local error instead of a confusing 403.
+Do not let either substitute for a correctly scoped token.
 
 ## Telemetry
 

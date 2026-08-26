@@ -24,6 +24,27 @@ docker compose up -d
 Your prompt will change from `[oc:myrepo|git:ro]` to `[oc:myrepo|git:rw]`
 so the new state is visible.
 
+## Narrowing where it may go
+
+`ALLOW_REMOTE_GIT=1` is binary: once on, every remote is reachable. To restrict
+the destination as well, add a whitespace- or comma-separated list of
+`host/path` prefixes:
+
+```
+ALLOW_REMOTE_GIT=1
+GIT_REMOTE_ALLOWLIST=gitlab.internal.example/my-group/
+```
+
+Prefixes match on a path-segment boundary, so `…/my-group` admits
+`…/my-group/service` but not `…/my-group-evil/service`. Empty or unset means no
+restriction beyond the switch itself.
+
+This is defence in depth, not a security boundary — the agent has a shell and
+can call `/usr/bin/git` directly, past the shim. It turns a mistake (a stale
+branch config, a pasted URL, a hallucinated remote) into a legible local error
+instead of a confusing 403. See [`ARCHITECTURE.md`](ARCHITECTURE.md), "The
+credential model", for what the actual boundary is.
+
 ## Turning it off
 
 Same edit, set back to `0`, `docker compose up -d`. The change takes effect
