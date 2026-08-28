@@ -338,11 +338,18 @@ PLUGINS_ENABLED_SET="${PLUGINS_ENABLED_SET//\'/}"
 # its REST API with a Bearer PAT too, so BITBUCKET_USER is optional and consumed
 # only by the §6 git credential helper when present. Every service still gates on
 # <SVC>_BASE_URL + <SVC>_PAT + DISABLE_<SVC>_MCP != 1. This table is the ONE
-# source both this gate and the §4b config-wiring loop walk. Adding service #6
+# source both this gate and the §4b config-wiring loop walk. Adding a singleton
 # is: drop the server dir under mcp-servers/, add its squid allowlist conf, add
 # one row here, add its keys to .env.example AND opencode/manifest.json (see
 # MAINTAINERS.md).
 MCP_SERVICES="bitbucket:0 jira:0 gitlab:1 jfrog:0 confluence:0 mfiles:0"
+
+# TeamCity is deliberately multi-instance rather than one table row. Ten
+# logical MCPs share one implementation directory; each launch wrapper maps its
+# own TEAMCITY<n>_BASE_URL/PAT pair onto the canonical names consumed by the
+# server. Keeping the list fixed makes the supported surface explicit to the
+# launcher/manifest and avoids evaluating user-provided instance names.
+TEAMCITY_INSTANCES="teamcity1 teamcity2 teamcity3 teamcity4 teamcity5 teamcity6 teamcity7 teamcity8 teamcity9 teamcity10"
 
 # Enabled MCP servers: those whose credentials are present and not disabled —
 # the SAME predicate §4b uses to actually wire them in (mcp_credentials_present),
@@ -352,6 +359,16 @@ for entry in ${MCP_SERVICES}; do
     mcp_credentials_present "${entry%%:*}" "${entry#*:}" \
         && MCPS_ENABLED_SET="${MCPS_ENABLED_SET} ${entry%%:*}"
 done
+teamcity_any=0
+for svc in ${TEAMCITY_INSTANCES}; do
+    if mcp_credentials_present "${svc}" 0; then
+        MCPS_ENABLED_SET="${MCPS_ENABLED_SET} ${svc}"
+        teamcity_any=1
+    fi
+done
+# The companion skill is shared by all instances, so its mcp=teamcity gate
+# means "at least one TeamCity instance is active".
+[ "${teamcity_any}" = "1" ] && MCPS_ENABLED_SET="${MCPS_ENABLED_SET} teamcity"
 
 for kind in agents skills commands mcp themes; do
     symlink_bundle "${kind}"
@@ -460,7 +477,7 @@ chown -R "${HOST_UID}:${HOST_GID}" "${SECRETS_DIR}"
 # service quiet instead of noisily failing to attach.
 #
 # The servers read their config (BITBUCKET_*/JIRA_*, HTTP(S)_PROXY) straight
-# from the environment and derive HTTP Basic themselves. Those come from the
+# from the environment and derive their auth headers themselves. Those come from the
 # .env env_file and so live in the container's stored env — inherited by any
 # process that spawns the server (the backend OR the TUI's docker exec). We do
 # NOT export derived vars here: a runtime export only lives in PID 1 and would
@@ -496,6 +513,25 @@ for entry in ${MCP_SERVICES}; do
         log "mcp on:  ${svc} (${base})"
     else
         log "mcp off: ${svc} (set ${hint} to enable)"
+    fi
+done
+
+# TeamCity instances use the same credential predicate and config shape, but
+# all point at one implementation. launch.sh selects the requested stored env
+# pair, unsets the other nine pairs in the child, and execs index.js with only
+# TEAMCITY_BASE_URL/PAT as the canonical server credentials.
+for svc in ${TEAMCITY_INSTANCES}; do
+    SVC="${svc^^}"
+    base_var="${SVC}_BASE_URL"; base="${!base_var:-}"
+    if mcp_credentials_present "${svc}" 0; then
+        arg_launcher="p_${svc}_launcher"
+        arg_instance="p_${svc}_instance"
+        cfg_filter="${cfg_filter} | .mcp.${svc} = {\"type\":\"local\",\"command\":[\$${arg_launcher},\$${arg_instance}],\"enabled\":true}"
+        cfg_jq_args+=(--arg "${arg_launcher}" "${MCP_DIR}/teamcity/launch.sh")
+        cfg_jq_args+=(--arg "${arg_instance}" "${svc}")
+        log "mcp on:  ${svc} (${base})"
+    else
+        log "mcp off: ${svc} (set ${SVC}_BASE_URL/PAT to enable)"
     fi
 done
 

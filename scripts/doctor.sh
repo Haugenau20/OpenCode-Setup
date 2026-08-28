@@ -166,7 +166,7 @@ if docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
     # force-disabled). Verify the rendered config matches that expectation and
     # that the runtime deps were vendored into the image.
     check_mcp() {
-        local svc="$1" want="$2"
+        local svc="$1" want="$2" impl="${3:-$1}"
         if [ "${want}" = "1" ]; then
             if docker exec "${CONTAINER}" \
                     jq -e ".mcp.${svc}" "${CFG}/opencode.json" >/dev/null 2>&1; then
@@ -175,10 +175,10 @@ if docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
                 bad "${svc}: credentials set but NOT wired into opencode.json (see: docker logs ${CONTAINER})"
             fi
             if docker exec "${CONTAINER}" \
-                    test -d "/opt/opencode/mcp-servers/${svc}/node_modules"; then
+                    test -d "/opt/opencode/mcp-servers/${impl}/node_modules"; then
                 ok "${svc}: runtime deps vendored"
             else
-                bad "${svc}: node_modules missing under /opt/opencode/mcp-servers/${svc} — rebuild (docker compose up -d --build)"
+                bad "${svc}: node_modules missing under /opt/opencode/mcp-servers/${impl} — rebuild (docker compose up -d --build)"
             fi
         else
             ok "${svc}: not configured — skipped (set its <SERVICE>_{BASE_URL,USER,PAT} to enable)"
@@ -186,7 +186,7 @@ if docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
     }
 
     # Same table as opencode/entrypoint.sh §4b: "<name>:<needs_user>". Mirror
-    # it here so "add service #6" stays a one-row diff in both places instead
+    # it here so adding a singleton service stays a one-row diff in both places instead
     # of two hand-written gate copies drifting apart.
     MCP_SERVICES="bitbucket:0 jira:0 gitlab:1 jfrog:0 confluence:0 mfiles:0"
 
@@ -210,6 +210,21 @@ if docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
             && [ "${disable}" != "1" ] && want=1
 
         check_mcp "${svc}" "${want}"
+    done
+
+    # TeamCity is one shared implementation launched as ten independently
+    # credentialed logical MCPs. A PAT for teamcity2 must never make teamcity1
+    # look configured, so calculate each gate from that instance's own pair.
+    TEAMCITY_INSTANCES="teamcity1 teamcity2 teamcity3 teamcity4 teamcity5 teamcity6 teamcity7 teamcity8 teamcity9 teamcity10"
+    for svc in ${TEAMCITY_INSTANCES}; do
+        SVC="${svc^^}"
+        base_var="${SVC}_BASE_URL";       base="${!base_var:-}"
+        pat_var="${SVC}_PAT";             pat="${!pat_var:-}"
+        disable_var="DISABLE_${SVC}_MCP"; disable="${!disable_var:-0}"
+
+        want=0
+        [ -n "${base}" ] && [ -n "${pat}" ] && [ "${disable}" != "1" ] && want=1
+        check_mcp "${svc}" "${want}" teamcity
     done
 
     # Two MCPs have a write plane, each gated separately from its credentials

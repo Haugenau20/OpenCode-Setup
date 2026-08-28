@@ -27,6 +27,28 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
+## [Unreleased]
+
+**Action required:** rebuild the OpenCode and Squid images, then add one URL/PAT
+pair to `.env` for each TeamCity instance the developer should access.
+
+### Added
+
+- A read-only TeamCity MCP implementation with tools for server information,
+  projects, build configurations, builds, logs, tests, problems, and changes.
+- Ten independent logical MCP connections, `teamcity1` through `teamcity10`.
+  Each is enabled only by its own `TEAMCITY<n>_BASE_URL` and
+  `TEAMCITY<n>_PAT`, can be disabled independently, and never accepts another
+  instance's PAT as a fallback. A small launcher maps only the selected pair to
+  the shared implementation and removes all numbered pairs from the child.
+- The `teamcity-fetch` skill, which selects one instance before querying and
+  keeps build identifiers scoped to that instance.
+- Squid entries for the ten instance names and TeamCity's default HTTP port
+  8111 in both `Safe_ports` and `SSL_ports`.
+- Doctor and Bats coverage for per-instance gating, credential isolation,
+  launcher validation, manifest parity, allowlist completeness, and proxy port
+  wiring.
+
 ## [0.4.0] — 2026-08-19
 
 **Action required:** re-pull image. Nothing to edit unless you were running

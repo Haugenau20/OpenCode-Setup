@@ -56,7 +56,8 @@ If something doesn't work, run `./scripts/doctor.sh` first.
 
 - OpenCode backend running as a non-root user in a container.
 - All outbound traffic forced through Squid; allowlist is the LLM endpoint,
-  Bitbucket, GitLab, JIRA, JFrog Artifactory, and Confluence.
+  Bitbucket, GitLab, JIRA, JFrog Artifactory, Confluence, M-Files, and ten
+  separately credentialed TeamCity instances.
 - Bundled workplace agents/skills/commands you can extend or disable.
 - A curated set of OpenCode plugins baked in but **off by default** — opt in per
   developer, no network needed. Run `/plugins` to see them.
@@ -161,23 +162,26 @@ instead of the blocking one-shot `bash` tool. It is absent when the plugin is
 off.
 
 
-## MCP servers (Bitbucket, GitLab, Jira, JFrog & Confluence)
+## MCP servers
 
-Five first-party, **read-only by default** MCP servers ship in the image, giving the agent
-direct access to the internal Bitbucket, GitLab, Jira, JFrog Artifactory, and
-Confluence instances (PRs/MRs, diffs, commits, files; issues + JQL search;
-artifacts, versions + build-info; wiki pages + CQL search). Each **auto-enables
-when its credentials are set** in `.env` — no separate switch — and a single PAT
-per service serves both git and the REST API where applicable, so no account
-password is stored. Bitbucket and GitLab also act as git remotes over HTTPS;
-Jira, JFrog and Confluence are API-only.
+Seven first-party MCP implementations ship in the image for Bitbucket, GitLab,
+Jira, JFrog Artifactory, Confluence, M-Files, and TeamCity. TeamCity's shared
+implementation can be launched as ten independent logical servers,
+`teamcity1`–`teamcity10`, each with its own base URL and instance-specific PAT.
+Every connection auto-enables only when its own credentials are set in `.env`.
+The TeamCity surface is GET-only and covers projects, build configurations,
+builds, logs, tests, problems, and changes.
 
-Confluence is the one server that can also **write** — creating and editing wiki
+The MCPs are read-only by default. Confluence and GitLab have separately gated
+write tools; TeamCity never registers write tools. Bitbucket and GitLab also
+act as git remotes over HTTPS. Full detail (env vars, auth, multi-instance
+TeamCity isolation, proxy ports, and adding services) is in
+[`docs/MCP_SERVERS.md`](docs/MCP_SERVERS.md).
+
+Confluence can also **write** — creating and editing wiki
 pages — and only when you opt in with `ALLOW_CONFLUENCE_WRITE=1` in `.env`,
 mirroring the git gate. Off by default the write tools aren't registered at all,
-and deleting pages is never possible. Full detail (env vars, the write tools and
-body formats, the HTTP-vs-HTTPS gotcha, the Confluence 8090 port, TLS, adding
-more services) in [`docs/MCP_SERVERS.md`](docs/MCP_SERVERS.md).
+and deleting pages is never possible.
 
 ## Per-developer allowlist additions
 

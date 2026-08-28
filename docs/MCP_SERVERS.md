@@ -1,8 +1,9 @@
-# MCP servers (Bitbucket, GitLab, Jira, JFrog, Confluence & M-Files)
+# MCP servers
 
-The image ships six first-party, **read-only** MCP servers that let the agent
+The image ships seven first-party MCP implementations that let the agent
 query the internal Bitbucket, GitLab, Jira, JFrog Artifactory, Confluence, and
-M-Files instances directly — all already on the Squid allowlist. They are
+M-Files instances, plus up to ten independent TeamCity instances, directly.
+All destinations are already represented on the Squid allowlist. They are
 `type: local` stdio servers (`node`), with their runtime deps vendored at build
 time so nothing hits npm at container start.
 
@@ -35,11 +36,16 @@ time so nothing hits npm at container start.
   `get_file_content`. This is the *document-management* (DMS) plane — objects
   are addressed by an **object type id** + **object id**, not a file path. Use
   Jira for issues, GitLab/Bitbucket for source, and Confluence for wiki pages.
+- **TeamCity** (`opencode/mcp-servers/teamcity/`): one shared implementation
+  launched as any configured `teamcity1`–`teamcity10` MCP. It exposes
+  `get_server_info`, project and build-configuration lookups, build listing and
+  detail, plus logs, tests, problems, and changes. All tools issue GET requests.
+  Each logical server uses only its matching `TEAMCITY<n>_BASE_URL` and
+  `TEAMCITY<n>_PAT`; identifiers and PATs are treated as instance-local.
 
-Read-only by default — mirroring the `git:ro`-by-default posture. Confluence is
-the one server with a write plane at all, and it is off unless you explicitly
-opt in with `ALLOW_CONFLUENCE_WRITE=1`; none of the other five can push, comment
-or deploy under any setting. With the switch off every tool issues GETs
+Read-only by default — mirroring the `git:ro`-by-default posture. Confluence and
+GitLab have separately gated write planes; TeamCity has no write plane under
+any setting. With both write switches off every tool issues GETs
 **except** JFrog's
 `aql_search`, which uses POST — but only because an AQL query rides in the
 request **body** (like an Elasticsearch `_search`), not because it writes. AQL's
@@ -48,8 +54,8 @@ is still strictly read-only. To keep an unbounded query from scanning a large
 (1M+ item) instance, `aql_search` enforces a `.limit()` and caps returned rows.
 
 Bitbucket and GitLab additionally double as **git remotes** over HTTPS (clone/push);
-see [`docs/ALLOWING_GIT_PUSH.md`](ALLOWING_GIT_PUSH.md). Jira, JFrog, Confluence
-and M-Files have no git transport — they are API-only.
+see [`docs/ALLOWING_GIT_PUSH.md`](ALLOWING_GIT_PUSH.md). Jira, JFrog, Confluence,
+M-Files, and TeamCity have no git transport — they are API-only.
 
 ## Enabling them
 
@@ -65,6 +71,7 @@ independent — you can have API access without git, or vice versa.
 | JFrog     | `JFROG_BASE_URL`, `JFROG_PAT`                       | `DISABLE_JFROG_MCP=1`   |
 | Confluence| `CONFLUENCE_BASE_URL`, `CONFLUENCE_PAT`            | `DISABLE_CONFLUENCE_MCP=1` |
 | M-Files   | `MFILES_BASE_URL`, `MFILES_PAT`                     | `DISABLE_MFILES_MCP=1`  |
+| TeamCity  | Each own pair: `TEAMCITY<n>_BASE_URL`, `TEAMCITY<n>_PAT`, for `n=1..10` | `DISABLE_TEAMCITY<n>_MCP=1` |
 
 Credential presence is the gate because the servers **exit on boot** without
 their env; registering one with no creds would just produce a noisy failed
@@ -145,11 +152,18 @@ the scheme its server expects (verified against the live instances):
   header (`X-Authentication: <MFILES_PAT>`) — not Authorization/Bearer, not
   Basic; no username is involved. This is the first server to use this scheme.
   The server appends `/REST` to `MFILES_BASE_URL`.
+- **TeamCity** — each instance's PAT is sent as
+  `Authorization: Bearer <TEAMCITY<n>_PAT>` to that instance's `/app/rest`
+  API. A PAT belongs to one TeamCity instance and is never used as a fallback
+  for another instance.
 
-Each server reads the **canonical `.env` names directly** (`BITBUCKET_*`,
-`GITLAB_*`, `JIRA_*`, `JFROG_*`, `CONFLUENCE_*`, `MFILES_*`) and builds its own
-auth header at startup. `.env` therefore never contains a pre-encoded blob; you
-only paste the PAT.
+Each singleton server reads its **canonical `.env` names directly**
+(`BITBUCKET_*`, `GITLAB_*`, `JIRA_*`, `JFROG_*`, `CONFLUENCE_*`, `MFILES_*`)
+and builds its own auth header at startup. TeamCity's launcher maps exactly one
+numbered pair to canonical `TEAMCITY_BASE_URL` / `TEAMCITY_PAT` for the shared
+implementation, then removes all ten numbered pairs from that child process's
+environment. `.env` therefore never contains a pre-encoded blob; you only
+paste each instance's PAT.
 
 This matters for *where the values live*. Compose loads `.env` via `env_file`,
 so those vars are part of the **container's stored environment** and are
@@ -188,11 +202,16 @@ when a service's credential trio is present. All egress goes through Squid.
 > **`MFILES_BASE_URL` is HTTPS, the site base** — the server appends `/REST`
 > itself, so set it to e.g. `https://mfiles.internal.example` (no trailing
 > slash).
+>
+> **`TEAMCITY<n>_BASE_URL` is the site base**, for example
+> `http://teamcity1:8111`. The server appends `/app/rest`; do not include that
+> path or a trailing slash. TeamCity's default connector is HTTP on **8111**,
+> which is present in both `Safe_ports` and `SSL_ports`.
 
 ## Getting an M-Files authentication token (`MFILES_PAT`)
 
 M-Files is the one service where you **mint the token yourself** rather than
-copy it from a web UI. The other five expose a "create personal access token"
+copy it from a web UI. The other six expose a "create personal access token"
 button; M-Files' `X-Authentication` value is instead a **session
 authentication token** you obtain by POSTing your vault credentials to the Web
 Service and reading back the `Value` it returns. That returned string is what
@@ -278,7 +297,8 @@ targets** — not a normal proxied `GET`. squid only permits `CONNECT` to ports 
   calls fail with a **denied `CONNECT` (403)**.
 - This is true even for plaintext HTTP. JFrog/Bitbucket on `http://…:80` need
   **`80` in `SSL_ports`** (it's there now); Confluence on `:8090` needs `8090`
-  there; an HTTPS service on `:443` is already covered.
+  there; TeamCity on `:8111` needs `8111` there; an HTTPS service on `:443` is
+  already covered.
 
 The confusing part: a plain `curl` through the proxy to the *same* URL **works**,
 because curl issues a normal proxied `GET` (allowed via `Safe_ports`). So "curl
@@ -349,15 +369,19 @@ verification.
   `list_classes`), free-text search (`search_objects`), fetching an object's
   metadata and file list (`get_object` / `get_object_properties`), and
   downloading an attached file (`get_file_content`).
+- The **`teamcity-fetch`** skill selects one configured TeamCity MCP for a
+  request, keeps identifiers scoped to that instance, and avoids cross-instance
+  fan-out unless the user explicitly asks for it.
 
-All six degrade gracefully when their MCP is disabled.
+All integrations degrade gracefully when their MCP is disabled. The TeamCity
+skill is available when at least one numbered instance is configured.
 
-## Writes: off by default, GitLab only
+## Writes: off by default
 
 Every server here is read-only by construction, which is a real safety property
-— a confused or prompt-injected agent cannot change anything in Bitbucket, Jira,
-JFrog, Confluence or M-Files. The GitLab server is the one exception, and only
-when you ask for it:
+— a confused or prompt-injected agent cannot change anything through Bitbucket,
+Jira, JFrog, M-Files, or TeamCity. Confluence's write tools are covered above;
+GitLab has its own independent opt-in, and only when you ask for it:
 
 ```
 ALLOW_GITLAB_WRITE=1
@@ -429,3 +453,10 @@ because Confluence's default connector is HTTP on **8090**, that port had to be
 opened in `squid.conf` (`Safe_ports`, plus `SSL_ports` to cover a TLS-fronted
 instance). The allowlist `.conf` files take **hostnames only**; ports always go
 in `squid.conf`, exactly as Bitbucket's git port `7990` does.
+
+**TeamCity** shows the multi-instance variant. Keep one implementation directory
+and launch it under several MCP names. Give every logical instance its own
+numbered URL, PAT, and disable switch; never maintain a shared fallback token.
+The wrapper passes only the selected pair to the server, while the entrypoint
+registers only complete, non-disabled pairs. Squid allowlists all ten hostnames
+in `70-teamcity.conf`, and the default port 8111 is opened in both port ACLs.

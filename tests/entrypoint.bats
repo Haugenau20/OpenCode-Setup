@@ -502,6 +502,23 @@ SRC='source "$ENTRYPOINT"'
   [ "$status" -eq 0 ]
 }
 
+@test "mcp_credentials_present: TeamCity instance is up only with its own URL + PAT" {
+  run bash -c "$SRC"'; TEAMCITY1_BASE_URL=http://teamcity1:8111 TEAMCITY1_PAT=t mcp_credentials_present teamcity1 0'
+  [ "$status" -eq 0 ]
+}
+
+@test "mcp_credentials_present: another TeamCity instance's PAT cannot complete the pair" {
+  run bash -c "$SRC"'; TEAMCITY1_BASE_URL=http://teamcity1:8111 TEAMCITY2_PAT=t mcp_credentials_present teamcity1 0'
+  [ "$status" -ne 0 ]
+}
+
+@test "mcp_credentials_present: TeamCity disable flag is per instance" {
+  run bash -c "$SRC"'; TEAMCITY1_BASE_URL=http://teamcity1:8111 TEAMCITY1_PAT=t DISABLE_TEAMCITY1_MCP=1 mcp_credentials_present teamcity1 0'
+  [ "$status" -ne 0 ]
+  run bash -c "$SRC"'; TEAMCITY1_BASE_URL=http://teamcity1:8111 TEAMCITY1_PAT=t DISABLE_TEAMCITY2_MCP=1 mcp_credentials_present teamcity1 0'
+  [ "$status" -eq 0 ]
+}
+
 @test "mcp_credentials_present: an entirely unconfigured service is not up" {
   run bash -c "$SRC"'; mcp_credentials_present confluence 0'
   [ "$status" -ne 0 ]
@@ -601,7 +618,7 @@ SRC='source "$ENTRYPOINT"'
 }
 
 # --- MCP gate loop --------------------------------------------------------
-# See tests/README.md "What's NOT covered" — the §4b MCP_SERVICES table walk
+# See tests/README.md "What's NOT covered" — the §4b MCP service table walks
 # reads/writes real filesystem paths under /opt/opencode (MCP_DIR) and
 # /etc/opencode (the jq config template) that only exist inside the built
 # image. Stubbing that whole layout to unit-test the loop's pure

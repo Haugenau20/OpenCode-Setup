@@ -1,0 +1,2 @@
+# Logical group: entrypoint adds this when any teamcity1..teamcity10 MCP is up.
+mcp=teamcity

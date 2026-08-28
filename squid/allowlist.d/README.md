@@ -9,6 +9,11 @@ entries. They are concatenated into the running squid config via
 - `00-llm.conf` — the LLM endpoint
 - `10-bitbucket.conf` — the Bitbucket server (both git and REST API)
 - `20-jira.conf` — the JIRA server
+- `30-gitlab.conf` — the GitLab server (both git and REST API)
+- `40-jfrog.conf` — JFrog Artifactory
+- `50-confluence.conf` — Confluence
+- `60-mfiles.conf` — M-Files
+- `70-teamcity.conf` — the ten TeamCity instance names (`teamcity1`–`teamcity10`)
 
 Replace the example hostnames with the real internal ones before building
 the production image.
@@ -24,8 +29,8 @@ These files hold `dstdomain` ACLs **only**. Do not add `acl allowed_dst port
 ...` (or any other ACL type) — squid rejects reusing a name with a different
 type (`ACL 'allowed_dst' already exists with different type`, which is fatal).
 Ports are configured in `squid.conf`: a non-standard TLS port that git/HTTPS
-needs to `CONNECT` to (e.g. Bitbucket on 7990) must be listed in `SSL_ports`
-there, not here.
+needs to `CONNECT` to (e.g. Bitbucket on 7990 or TeamCity on 8111) must be
+listed in `SSL_ports` there, not here.
 
 ## Per-developer additions
 

@@ -117,7 +117,7 @@ RUN mkdir -p /build/pty && cd /build/pty \
     && printf '%s\n' "${PTY_REF}" > /staging/plugins/opencode-pty/.baked-version
 
 # ---- MCP build: vendor first-party MCP server deps, offline-ready ------------
-# The first-party MCP servers (Bitbucket, GitLab, Jira, JFrog) are committed
+# The first-party MCP servers are committed
 # under opencode/mcp-servers/. The loop below globs every directory, so adding a
 # new server folder needs no change here. Install their runtime deps so nothing
 # hits npm at container start — the egress lock would block it. Deps are pure JS
@@ -177,7 +177,7 @@ COPY CHANGELOG.md /etc/opencode/CHANGELOG.md
 COPY --from=plugins-build /staging/plugins/ /opt/opencode/bundle/plugins/
 COPY opencode/disabled.yaml.default /etc/opencode/disabled.yaml.default
 
-# First-party MCP servers (Bitbucket, GitLab, Jira, JFrog) with runtime deps
+# First-party MCP servers with runtime deps
 # vendored in the mcp-build stage. The entrypoint wires each into opencode.json
 # only when its credentials are present in .env.
 COPY --from=mcp-build /staging/mcp-servers/ /opt/opencode/mcp-servers/

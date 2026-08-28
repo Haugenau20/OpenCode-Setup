@@ -73,6 +73,33 @@ setup() {
   }
 }
 
+@test "TeamCity: entrypoint declares exactly teamcity1 through teamcity10" {
+  local actual expected
+  actual="$(grep -oE '^TEAMCITY_INSTANCES="[^"]*"' "$REPO_ROOT/opencode/entrypoint.sh" \
+    | sed -E 's/^TEAMCITY_INSTANCES="//; s/"$//')"
+  expected="teamcity1 teamcity2 teamcity3 teamcity4 teamcity5 teamcity6 teamcity7 teamcity8 teamcity9 teamcity10"
+  [ "$actual" = "$expected" ]
+}
+
+@test "TeamCity: every instance has its own URL, PAT and disable key" {
+  local n key
+  for n in $(seq 1 10); do
+    for key in "TEAMCITY${n}_BASE_URL" "TEAMCITY${n}_PAT" "DISABLE_TEAMCITY${n}_MCP"; do
+      grep -qE "^${key}=" "$REPO_ROOT/.env.example"
+      jq -e --arg key "$key" '.env_keys | any(.key == $key and .required == false)' \
+        "$REPO_ROOT/opencode/manifest.json" >/dev/null
+    done
+  done
+}
+
+@test "TeamCity: launcher selects one pair and removes all numbered pairs from the child" {
+  local launcher="$REPO_ROOT/opencode/mcp-servers/teamcity/launch.sh"
+  grep -q 'base_var="${SVC}_BASE_URL"' "$launcher"
+  grep -q 'pat_var="${SVC}_PAT"' "$launcher"
+  grep -q 'for n in {1..10}' "$launcher"
+  grep -q 'unset "TEAMCITY${n}_BASE_URL" "TEAMCITY${n}_PAT"' "$launcher"
+}
+
 # --- squid -------------------------------------------------------------------
 
 @test "squid allowlist.d: every non-comment line is an 'acl allowed_dst dstdomain ...' line" {
@@ -92,11 +119,20 @@ setup() {
   }
 }
 
-@test "squid.conf: SSL_ports includes 80, 443 and 8090" {
-  for port in 80 443 8090; do
+@test "squid.conf: SSL_ports includes 80, 443, 8090 and 8111" {
+  for port in 80 443 8090 8111; do
     grep -qE "^acl SSL_ports port ${port}([[:space:]]|\$)" "$REPO_ROOT/squid/squid.conf" \
       || { echo "SSL_ports missing port $port" >&2; return 1; }
   done
+}
+
+@test "TeamCity: Squid allowlists all ten instance names and both port ACLs include 8111" {
+  local n allow="$REPO_ROOT/squid/allowlist.d/70-teamcity.conf"
+  for n in $(seq 1 10); do
+    grep -qx "acl allowed_dst dstdomain teamcity${n}" "$allow"
+  done
+  grep -qE '^acl Safe_ports port 8111([[:space:]]|$)' "$REPO_ROOT/squid/squid.conf"
+  grep -qE '^acl SSL_ports port 8111([[:space:]]|$)' "$REPO_ROOT/squid/squid.conf"
 }
 
 @test "squid.conf: the denial-logging access_log lines appear before the terminal 'access_log none'" {
