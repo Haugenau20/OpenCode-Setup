@@ -27,6 +27,18 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
+## [0.5.0] — 2026-09-23
+
+**Action required:** re-pull image.
+
+### Added
+- **New model configuration.** Added `<MODEL_NAME>` with four reasoning levels:
+  `<REASONING_LEVEL_1>`, `<REASONING_LEVEL_2>`, `<REASONING_LEVEL_3>`, and
+  `<REASONING_LEVEL_4>`.
+
+### Changed
+- **Bumped the bundled OpenCode CLI to `1.18.32`** (from `1.17.15`).
+
 ## [0.4.0] — 2026-08-19
 
 **Action required:** re-pull image. Nothing to edit unless you were running
