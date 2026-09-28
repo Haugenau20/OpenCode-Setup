@@ -2,18 +2,21 @@
 
 Unlike `agents/`, `skills/`, and `commands/` (which are plain files checked into
 this directory), **plugins are built at image-build time**, not stored here. The
-real plugin code — often with a `node_modules/` — is cloned and vendored by the
-`plugins-build` stage in [`../../Dockerfile`](../../Dockerfile) and lands at
+third-party plugin code — often with a `node_modules/` — is cloned and vendored
+by the `plugins-build` stage in [`../../Dockerfile`](../../Dockerfile) and lands at
 `/opt/opencode/bundle/plugins/<name>/` inside the image. This file is the only
-thing in `plugins/` that ships from the repo.
+thing in this source directory that ships from the repo. First-party plugins
+live in `../../plugins/` and are copied by the same build stage, with no
+dependency install required for `merge-system`.
 
 ## Why plugins are different
 
-- **Opt-in / default-OFF, env-var controlled.** Agents/skills/commands ship
-  enabled; plugins ship disabled. A developer turns one on **only** via the
+- **Required compatibility hook + optional plugins.** `merge-system` is
+  always enabled. Other plugins are default-OFF; a developer enables them via the
   `ENABLED_PLUGINS` list in `.env` (space/comma-separated). `disabled.yaml` does
   *not* control plugins — it persists in a volume and would silently override
-  `.env`. The entrypoint rebuilds the plugin symlinks to match `ENABLED_PLUGINS`
+  `.env`. The entrypoint always links `merge-system` and rebuilds optional
+  plugin symlinks to match `ENABLED_PLUGINS`
   on every boot. `/plugins` shows the live state.
 - **Loaded by symlink, not by the `plugin` array.** OpenCode auto-scans
   `plugin/*.{ts,js}` in each config dir and imports the files directly (it
@@ -22,8 +25,10 @@ thing in `plugins/` that ships from the repo.
   plugins into `~/.config/opencode/plugin/`. We deliberately do **not** put
   entries in `opencode.json`'s `plugin` array — that path makes OpenCode/Bun
   run a network install, which the egress lock blocks. `policy.yaml` also sets
-  `BUN_CONFIG_SKIP_INSTALL_PACKAGES=true` so no startup install is attempted;
-  resolution falls back to each plugin's vendored `node_modules`.
+  `BUN_CONFIG_SKIP_INSTALL_PACKAGES=true` and `NPM_CONFIG_OFFLINE=true`.
+  The latter prevents OpenCode 1.18.32's npm dependency checks from waiting
+  for unreachable registry retries; uncached dependencies fail immediately.
+  Plugin imports resolve against each plugin's vendored `node_modules`.
 
 ## Layout the entrypoint expects
 
@@ -48,7 +53,10 @@ sitting next to the real files is found automatically.
 
 Edit the `plugins-build` stage in `../../Dockerfile`: clone at a pinned ref, build
 if needed, vendor runtime deps, write an `entries` manifest, and `cp` the result
-into `/staging/plugins/<name>/`. Then record it in the `.env.example`
+into `/staging/plugins/<name>/`. For a dependency-free first-party plugin,
+check its source and `entries` manifest into `../../plugins/<name>/` and
+`COPY` that directory into the same staging path. Record every plugin in
+`../../manifest.json` and in the `.env.example`
 `ENABLED_PLUGINS` comment, the description + `Source:` URL in
 `../commands/plugins.md`, the **canonical provenance row** (name, upstream link,
 pinned version) in the [README "Plugins" table](../../../README.md#plugins), and
@@ -58,7 +66,8 @@ the load on every bump. See
 
 ## Currently baked
 
-All OFF by default (opt-in via `ENABLED_PLUGINS`); pinned versions live in
+`merge-system` is always on. Others are OFF by default (opt-in via
+`ENABLED_PLUGINS`); pinned third-party versions live in
 `../../Dockerfile` and the [README table](../../../README.md#plugins).
 
 | Name | What it is | Upstream |
@@ -67,3 +76,4 @@ All OFF by default (opt-in via `ENABLED_PLUGINS`); pinned versions live in
 | `dcp` | Dynamic context pruning — trims stale tool output from the context window to save tokens. | [Opencode-DCP/opencode-dynamic-context-pruning](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning) |
 | `opencode-workspace` | `plan_save`/`plan_read` tools + background-agent delegation (async sub-agents). | [kdcokenny/opencode-workspace](https://github.com/kdcokenny/opencode-workspace) |
 | `opencode-pty` | Interactive PTY management: run background processes in real pseudo-terminals, stream/regex-filter their output, plus a local web viewer. | [shekohex/opencode-pty](https://github.com/shekohex/opencode-pty) |
+| `merge-system` | Always on: merges system prompt blocks for the saga vLLM gateway's Qwen3.5 template. | [First-party source](../../plugins/merge-system/merge-system.js) |

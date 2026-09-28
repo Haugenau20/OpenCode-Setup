@@ -127,6 +127,60 @@ skill_gate_ok() {
     return 0
 }
 
+# Required compatibility hooks are always present; ENABLED_PLUGINS only adds
+# optional plugins. Keep this set shared by linking and companion-skill gates.
+enabled_plugins() {
+    local plugins="${ENABLED_PLUGINS:-}"
+    plugins="${plugins//,/ }"
+    plugins="${plugins//\"/}"
+    plugins="${plugins//\'/}"
+    printf '%s\n' "merge-system ${plugins}"
+}
+
+# Link the packaged plugin entries into OpenCode's auto-discovery directory.
+symlink_plugins() {
+    local link dir name linkname relpath
+    local PLUGIN_SRC="${BUNDLE}/plugins"
+    local PLUGIN_DST="${USER_CFG}/plugin"
+    if [ -d "${PLUGIN_SRC}" ]; then
+        # Rebuild links each boot from the required + optional plugin set.
+        # Remove every symlink WE manage (target under the bundle),
+        # valid or broken — the config dir is a persistent volume, so a link from a
+        # previous boot would otherwise linger and keep a plugin on. User-provided
+        # real files / symlinks pointing outside the bundle are left untouched.
+        if [ -d "${PLUGIN_DST}" ]; then
+            for link in "${PLUGIN_DST}"/*; do
+                [ -L "${link}" ] || continue
+                case "$(readlink "${link}")" in
+                    "${PLUGIN_SRC}"/*) rm -f "${link}" ;;
+                esac
+            done
+        fi
+
+        # PLUGINS_ENABLED_SET includes required plugins and the normalized optional
+        # ENABLED_PLUGINS list; reuse it for linking and companion-skill gates.
+        for dir in "${PLUGIN_SRC}"/*/; do
+            [ -d "${dir}" ] || continue
+            name="$(basename "${dir}")"
+            if ! printf ' %s ' "${PLUGINS_ENABLED_SET}" | grep -q " ${name} "; then
+                log "plugin off: ${name} (enable via ENABLED_PLUGINS in .env; see /plugins)"
+                continue
+            fi
+            [ -f "${dir}entries" ] || { log "plugin ${name}: no entries manifest, skipping"; continue; }
+            while IFS='=' read -r linkname relpath; do
+                [ -n "${linkname}" ] && [ -n "${relpath}" ] || continue
+                case "${linkname}" in \#*) continue ;; esac
+                ln -sfn "${dir}${relpath}" "${PLUGIN_DST}/${linkname}"
+            done < "${dir}entries"
+            # Per-plugin runtime config seeded into the user config dir, if shipped.
+            if [ -f "${dir}seed/dcp.jsonc" ] && [ ! -f "${USER_CFG}/dcp.jsonc" ]; then
+                cp "${dir}seed/dcp.jsonc" "${USER_CFG}/dcp.jsonc"
+            fi
+            log "plugin on:  ${name}"
+        done
+    fi
+}
+
 symlink_bundle() {
     local kind="$1"
     local src="${BUNDLE}/${kind}"
@@ -322,13 +376,9 @@ fi
 # below consults them, so a skill for a disabled plugin or an unconfigured MCP is
 # simply never linked (and is retracted on the next boot if it was linked before).
 
-# Enabled plugins: the normalized ENABLED_PLUGINS list (§3b reuses this exact
-# value to do the actual plugin symlinking). Space-separated; membership is
-# tested by padding both sides with spaces so a name matches only as a whole word.
-PLUGINS_ENABLED_SET="${ENABLED_PLUGINS:-}"
-PLUGINS_ENABLED_SET="${PLUGINS_ENABLED_SET//,/ }"
-PLUGINS_ENABLED_SET="${PLUGINS_ENABLED_SET//\"/}"
-PLUGINS_ENABLED_SET="${PLUGINS_ENABLED_SET//\'/}"
+# Required compatibility plugins plus optional ENABLED_PLUGINS. §3b uses the
+# same set, so companion-skill gates agree with the actual linked plugins.
+PLUGINS_ENABLED_SET="$(enabled_plugins)"
 
 # One row per first-party MCP service: "<name>:<needs_user>". needs_user=1 means
 # the MCP gate additionally requires <SVC>_USER. Only GitLab is 1: it doubles as
@@ -386,58 +436,20 @@ if [ -f "${BUNDLE}/tui.json" ]; then
     fi
 fi
 
-# ---- 3b. Plugins: opt-in, enabled ONLY via the ENABLED_PLUGINS env var --------
+# ---- 3b. Plugins: required compatibility hooks + optional ENABLED_PLUGINS ----
 # OpenCode auto-scans `{plugin,plugins}/*.{ts,js}` in each config dir and imports
 # the files directly (no Bun install, follows symlinks). Each baked plugin lives
 # at ${BUNDLE}/plugins/<name>/ with an `entries` manifest
 # (`<symlink-name>=<relative/entry/path>` per line); we symlink the entry files
 # of the enabled plugins into ${USER_CFG}/plugin/.
 #
-# ENABLED_PLUGINS (set in .env on the host) is the SINGLE source of truth — a
+# merge-system is always on. ENABLED_PLUGINS controls optional plugins only: a
 # space- or comma-separated list, e.g. `ENABLED_PLUGINS=superpowers dcp`. We
 # deliberately do NOT read plugin state from disabled.yaml: that file is seeded
 # into a persistent volume and would silently override .env (a real footgun).
 # The `plugin` array in opencode.json is likewise unused — it triggers a network
 # Bun install the egress blocks.
-PLUGIN_SRC="${BUNDLE}/plugins"
-PLUGIN_DST="${USER_CFG}/plugin"
-if [ -d "${PLUGIN_SRC}" ]; then
-    # Rebuild the enabled set from scratch each boot so ENABLED_PLUGINS is truly
-    # authoritative. Remove every symlink WE manage (target under the bundle),
-    # valid or broken — the config dir is a persistent volume, so a link from a
-    # previous boot would otherwise linger and keep a plugin on. User-provided
-    # real files / symlinks pointing outside the bundle are left untouched.
-    if [ -d "${PLUGIN_DST}" ]; then
-        for link in "${PLUGIN_DST}"/*; do
-            [ -L "${link}" ] || continue
-            case "$(readlink "${link}")" in
-                "${PLUGIN_SRC}"/*) rm -f "${link}" ;;
-            esac
-        done
-    fi
-
-    # ENABLED_PLUGINS was already normalized (commas/quotes stripped) into
-    # PLUGINS_ENABLED_SET in §3a; reuse it as the single source of truth.
-    for dir in "${PLUGIN_SRC}"/*/; do
-        [ -d "${dir}" ] || continue
-        name="$(basename "${dir}")"
-        if ! printf ' %s ' "${PLUGINS_ENABLED_SET}" | grep -q " ${name} "; then
-            log "plugin off: ${name} (enable via ENABLED_PLUGINS in .env; see /plugins)"
-            continue
-        fi
-        [ -f "${dir}entries" ] || { log "plugin ${name}: no entries manifest, skipping"; continue; }
-        while IFS='=' read -r linkname relpath; do
-            [ -n "${linkname}" ] && [ -n "${relpath}" ] || continue
-            case "${linkname}" in \#*) continue ;; esac
-            ln -sfn "${dir}${relpath}" "${PLUGIN_DST}/${linkname}"
-        done < "${dir}entries"
-        # Per-plugin runtime config seeded into the user config dir, if shipped.
-        if [ -f "${dir}seed/dcp.jsonc" ] && [ ! -f "${USER_CFG}/dcp.jsonc" ]; then
-            cp "${dir}seed/dcp.jsonc" "${USER_CFG}/dcp.jsonc"
-        fi
-        log "plugin on:  ${name}"
-    done
-fi
+symlink_plugins
 
 # ---- 4. Provision LLM credentials + config -----------------------------------
 # opencode's {env:...} substitution is unreliable for apiKey in custom providers

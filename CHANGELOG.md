@@ -27,6 +27,24 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
+## [Unreleased]
+
+**Action required:** rebuild/re-pull the OpenCode image and restart. No
+`.env` change is needed; `merge-system` is always on.
+
+### Added
+
+- **Always-on `merge-system` plugin.** Bakes the dependency-free system prompt
+  merge hook into the image for the saga vLLM gateway's Qwen3.5 template,
+  which rejects conversations containing multiple system messages with a
+  500. Joins nonblank blocks in order without replacing the system array.
+
+### Fixed
+
+- Set npm offline mode alongside the existing Bun install guard. OpenCode
+  1.18.32 uses npm for startup dependency checks; without the npm guard,
+  loading plugins on a fresh offline config waits for registry retries.
+
 ## [0.5.0] — 2026-09-23
 
 **Action required:** re-pull image.

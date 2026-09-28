@@ -39,7 +39,7 @@ record_result() {
 }
 
 # repo_shell_files — the same file set static.bats checks with `bash -n` /
-# shellcheck, kept here too so `./scripts/check.sh` fails fast on a syntax
+# ShellCheck, kept here too so `./scripts/check.sh` fails fast on a syntax
 # error without waiting on a bats fetch.
 repo_shell_files() {
     { find "$ROOT" -name '*.sh' \

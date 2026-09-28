@@ -50,6 +50,7 @@
     "superpowers",
     "dcp",
     "opencode-workspace",
-    "opencode-pty"
+    "opencode-pty",
+    "merge-system"
   ]
 }

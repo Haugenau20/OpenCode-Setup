@@ -1,13 +1,14 @@
 # Plugins: enabling, disabling, and adding
 
 OpenCode plugins are JS/TS modules that hook into the agent's lifecycle (and can
-bundle skills/tools). This image ships a curated set **baked in but turned OFF**
-— they are pure opt-in. Enabling one needs **no network**: the code and its
-dependencies are already vendored in the image.
+bundle skills/tools). This image ships `merge-system` **always on** for gateway
+compatibility, plus optional plugins **baked in but turned OFF**. Loading them
+needs **no network**: the code and dependencies are already in the image.
 
 ## What's baked in
 
-All ship **OFF** (opt-in via `ENABLED_PLUGINS`). Pinned versions and the full
+`merge-system` is required and always **ON**. Others ship **OFF** (opt-in via
+`ENABLED_PLUGINS`). Pinned third-party versions and the full
 provenance table live in the [README "Plugins" section](../README.md#plugins);
 the pins themselves are set in [`../opencode/Dockerfile`](../opencode/Dockerfile).
 
@@ -17,6 +18,7 @@ the pins themselves are set in [`../opencode/Dockerfile`](../opencode/Dockerfile
 | `dcp` | Dynamic context pruning — silently trims stale tool output from the context window to save tokens. | [Opencode-DCP/opencode-dynamic-context-pruning](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning) |
 | `opencode-workspace` | `plan_save`/`plan_read` planning tools + background-agent delegation (async sub-agents). | [kdcokenny/opencode-workspace](https://github.com/kdcokenny/opencode-workspace) |
 | `opencode-pty` | Interactive PTY management: run background processes in real pseudo-terminals, stream/regex-filter their output, plus a local web viewer. | [shekohex/opencode-pty](https://github.com/shekohex/opencode-pty) |
+| `merge-system` | Merges multiple system blocks into a single message for saga / Qwen3.5. | [First-party source](../opencode/plugins/merge-system/merge-system.js) |
 
 Run **`/plugins`** in the TUI for the live catalog and current on/off state.
 
@@ -26,6 +28,12 @@ Each plugin surfaces differently — there is no single "plugins" list in the TU
 that shows them (the Ctrl-P plugins dialog only lists `opencode.json` `plugin`
 array entries, which we don't use):
 
+- **merge-system** is always on and has no user-facing tools. No `.env`
+  change is needed; rebuild/re-pull the image and restart to pick it up.
+  It merges nonblank system prompt blocks before the request is built,
+  avoiding the saga / Qwen3.5 multi-system-message 500. It applies to all
+  models. A live request to the gateway is the end-to-end
+  check; it does not address unrelated tool or gateway failures.
 - **superpowers** registers skills and injects a bootstrap — ask *"tell me about
   your superpowers"* or check the skills list.
 - **opencode-workspace** adds model-callable tools — `plan_save`, `plan_read`,
@@ -50,10 +58,13 @@ array entries, which we don't use):
 
 ## Turning a plugin on or off (developer)
 
-Plugins are toggled by **one variable in your host `.env`** —
+**`merge-system` is always on**, including when `ENABLED_PLUGINS` is empty or
+`disabled.yaml` lists it. It cannot be turned off through either setting.
+
+Optional plugins are toggled by **one variable in your host `.env`** —
 `ENABLED_PLUGINS` — exactly like every other switch in this system
 (`ALLOW_REMOTE_GIT`). It is the **single source of truth**
-for plugins. No container, no YAML, no shell-in.
+for optional plugins. No container, no YAML, no shell-in.
 
 ```dotenv
 # .env (on your host)
@@ -61,11 +72,12 @@ ENABLED_PLUGINS=superpowers dcp
 ```
 
 Then re-run the launcher (or `scripts/opencode`). Names are space- or
-comma-separated; available names are `superpowers`, `dcp`, `opencode-workspace`.
+comma-separated; available names are `superpowers`, `dcp`, `opencode-workspace`,
+and `opencode-pty`. `merge-system` does not need to be listed.
 On every boot the entrypoint rebuilds the set from scratch: it removes the
-plugin symlinks it manages and re-creates only the ones named in
-`ENABLED_PLUGINS`. To disable a plugin, remove it from the line (or empty the
-line) and restart. Verify:
+plugin symlinks it manages, always links `merge-system`, and re-creates
+optional entries named in `ENABLED_PLUGINS`. To disable an optional plugin,
+remove it from the line (or empty the line) and restart. Verify:
 
 ```bash
 docker exec opencode-<slug> ls -l /home/dev/.config/opencode/plugin/
@@ -76,9 +88,9 @@ docker exec opencode-<slug> ls -l /home/dev/.config/opencode/plugin/
 > step.
 
 > **`disabled.yaml` does NOT control plugins.** That file toggles bundled
-> agents/skills/commands/mcp (which ship ON). Plugins are opt-in and driven
-> solely by `ENABLED_PLUGINS`, so there is no second, persistent source of truth
-> hiding in a volume. See [`ADDING_SKILLS.md`](ADDING_SKILLS.md) for the bundle
+> agents/skills/commands/mcp (which ship ON). Optional plugins are driven
+> solely by `ENABLED_PLUGINS`; `merge-system` is always on. There is no second
+> source of truth hiding in a volume. See [`ADDING_SKILLS.md`](ADDING_SKILLS.md) for the bundle
 > toggles.
 
 ## Why you can't just paste a GitHub plugin URL
@@ -100,11 +112,17 @@ This requires an image rebuild. Open a PR against this repo.
    (tag or commit SHA — never a moving branch), build if it needs compiling,
    install/prune its **runtime** dependencies, and lay the result out under
    `/staging/plugins/<name>/` with an `entries` manifest
-   (`<symlink-name>=<relative/entry/path>` per line).
-2. **List it as available.** Plugins are OFF unless named in `ENABLED_PLUGINS`,
-   so there's nothing to "default off" — just add the new name to the
+   (`<symlink-name>=<relative/entry/path>` per line). For a dependency-free
+   first-party plugin such as `merge-system`, commit its source, `package.json`
+   (`type: module`), and `entries` under `opencode/plugins/<name>/`, then
+   `COPY` that directory into the same staging path. It is versioned with
+   the image rather than an external ref.
+2. **List it as available.** New optional plugins are OFF unless named in
+   `ENABLED_PLUGINS`. Add the new name to the
    `ENABLED_PLUGINS` comment in [`../.env.example`](../.env.example) so users
-   know it exists.
+   know it exists. Also add it to `plugins[]` in
+   [`../opencode/manifest.json`](../opencode/manifest.json) so launchers can
+   discover it.
 3. **Make it discoverable + traceable.** Add a row (name, description, upstream
    link, pinned version) to the [README "Plugins" table](../README.md#plugins)
    — the canonical provenance — and add the name + description + `Source:` URL to
