@@ -29,7 +29,7 @@ setup() {
       import { pathToFileURL } from "node:url";
       const { default: plugin } = await import(pathToFileURL(process.argv[1]));
       const output = {system: ["main", "<date-awareness>today</date-awareness>"]};
-      await (await plugin())["experimental.chat.system.transform"]({}, output);
+      await (await plugin())["experimental.chat.system.transform"]({model: {id: "<model>"}}, output);
       if (output.system.length !== 1) process.exit(1);
     '\'' "$USER_CFG/plugin/merge-system.js"
   '

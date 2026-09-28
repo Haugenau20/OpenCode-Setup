@@ -151,9 +151,11 @@ or an entry in `disabled.yaml`. It works around the gateway 500 caused by
 multiple system messages (for example, the main prompt plus
 `<date-awareness>`). The hook preserves nonblank text and its order, joins
 blocks with a blank line, and updates the existing system array in place.
-A single system block is unchanged. It applies to every model;
-it does not change tools or resolve other gateway errors. Compatibility with
-`opencode-workspace` still needs a live gateway check.
+A single system block is unchanged. The hook only runs when `input.model.id`
+exactly matches the ID in the plugin's guard. The checked-in value is
+`"<model>"`; replace it with the deployment's model ID before building.
+All other or missing model IDs are a no-op. Remove the plugin once the backend
+is fixed. Compatibility with `opencode-workspace` still needs a live gateway check.
 
 ### `opencode-pty`'s web viewer
 

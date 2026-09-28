@@ -31,9 +31,11 @@ array entries, which we don't use):
 - **merge-system** is always on and has no user-facing tools. No `.env`
   change is needed; rebuild/re-pull the image and restart to pick it up.
   It merges nonblank system prompt blocks before the request is built,
-  avoiding the saga / Qwen3.5 multi-system-message 500. It applies to all
-  models. A live request to the gateway is the end-to-end
-  check; it does not address unrelated tool or gateway failures.
+  avoiding the saga / Qwen3.5 multi-system-message 500 only for the exact
+  `input.model.id` in its guard. Replace the checked-in `"<model>"` placeholder
+  with the deployment's model ID before building; all other or missing IDs
+  leave messages unchanged. A live request to the gateway is the end-to-end
+  check. Remove the plugin once the backend is fixed.
 - **superpowers** registers skills and injects a bootstrap — ask *"tell me about
   your superpowers"* or check the skills list.
 - **opencode-workspace** adds model-callable tools — `plan_save`, `plan_read`,
