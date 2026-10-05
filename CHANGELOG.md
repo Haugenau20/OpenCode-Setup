@@ -27,7 +27,7 @@ up. The vocabulary:
 > best-effort. Adjust them where you know better — newer releases should be
 > written at release time and will be accurate.
 
-## [Unreleased]
+## [0.5.2] — 2026-10-05
 
 **Action required:** rebuild/re-pull the OpenCode image and restart. No
 `.env` change is needed; `merge-system` is always on.
@@ -44,6 +44,15 @@ up. The vocabulary:
 - Set npm offline mode alongside the existing Bun install guard. OpenCode
   1.18.32 uses npm for startup dependency checks; without the npm guard,
   loading plugins on a fresh offline config waits for registry retries.
+
+## [0.5.1] — 2026-09-28
+
+**Action required:** re-pull image.
+
+### Added
+
+- **New model name.** Renamed `Qwen3.5-122B-A10B` to `Qwen3.5-122B-A10B-NFVP4` with four reasoning levels:
+  `none`, `low`, `medium`, and `xhigh`.
 
 ## [0.5.0] — 2026-09-23
 
