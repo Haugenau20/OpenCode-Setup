@@ -11,6 +11,11 @@ env:
   # stall/​noise the boot). Resolution falls back to the vendored node_modules.
   BUN_CONFIG_SKIP_INSTALL_PACKAGES: "true"
 
+  # OpenCode 1.18.32 uses npm for config-directory dependencies. An always-on
+  # plugin waits for that initialization, so fail uncached lookups immediately
+  # instead of retrying a registry the runtime network cannot reach.
+  NPM_CONFIG_OFFLINE: "true"
+
   # Common phone-home flags for tooling we ship.
   DO_NOT_TRACK: "1"
   NEXT_TELEMETRY_DISABLED: "1"

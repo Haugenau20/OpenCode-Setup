@@ -11,7 +11,8 @@ Do this, then stop:
 2. Determine each plugin's ACTUAL loaded state by inspecting
    `~/.config/opencode/plugin/`: a plugin is `ON` if that directory contains a
    symlink whose target is under `/opt/opencode/bundle/plugins/<name>/`, else
-   `OFF`. (This reflects what the entrypoint linked from `ENABLED_PLUGINS`.)
+   `OFF`. (The entrypoint always links `merge-system`; other plugins follow
+   `ENABLED_PLUGINS`.) If `merge-system` is `OFF`, report a setup problem.
 3. Print a compact table — one row per baked plugin — with: the plugin name,
    `ON`/`OFF`, a one-line description, and the upstream source, from this map:
    - `superpowers` — skills library: brainstorming, writing-plans,
@@ -28,9 +29,12 @@ Do this, then stop:
      pty_write / pty_read / pty_list / pty_kill), plus a local web viewer
      (/pty-open-background-spy).
      Source: https://github.com/shekohex/opencode-pty
+   - `merge-system` — always on; merges system prompt blocks into one message
+     to avoid the saga vLLM gateway's Qwen3.5 multi-system-message 500.
+     Source: https://github.com/Haugenau20/OpenCode-Setup/tree/main/opencode/plugins/merge-system
    (If a baked plugin isn't in this map, show its name with "(no description).")
-4. Finish with one line on how to toggle: set `ENABLED_PLUGINS` in `.env` on the
-   host (space- or comma-separated, e.g. `ENABLED_PLUGINS=superpowers dcp`) and
-   restart. Enabling needs no network; the plugins are already baked in.
+4. Finish with one line on how to toggle optional plugins: set `ENABLED_PLUGINS`
+   in `.env` on the host (e.g. `ENABLED_PLUGINS=superpowers dcp`) and
+   restart. `merge-system` is always on and cannot be toggled. No network is needed.
 
 Keep it to the table plus the one-line how-to. Do not modify any files.

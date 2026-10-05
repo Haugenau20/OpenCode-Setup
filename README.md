@@ -58,8 +58,9 @@ If something doesn't work, run `./scripts/doctor.sh` first.
 - All outbound traffic forced through Squid; allowlist is the LLM endpoint,
   Bitbucket, GitLab, JIRA, JFrog Artifactory, and Confluence.
 - Bundled workplace agents/skills/commands you can extend or disable.
-- A curated set of OpenCode plugins baked in but **off by default** — opt in per
-  developer, no network needed. Run `/plugins` to see them.
+- A curated set of OpenCode plugins baked in: `merge-system` is **always on**
+  for gateway compatibility; the others are opt-in, with no network needed.
+  Run `/plugins` to see them.
 - A git safety gate: remote operations (`push`, `fetch`, `pull`, `clone`)
   are blocked unless `ALLOW_REMOTE_GIT=1` in `.env`.
 - The same gate for the wiki: the Confluence MCP can only read pages unless
@@ -109,8 +110,8 @@ Three scopes (image, you-only, this-repo). See
 
 ## Plugins
 
-A curated set of OpenCode plugins is baked into the image but **off by default**.
-Turn them on the same way as every other switch — a line in `.env`:
+The `merge-system` compatibility plugin is **always on**. Other baked plugins
+are **off by default**; turn those on with a line in `.env`:
 
 ```
 ENABLED_PLUGINS=superpowers dcp
@@ -122,10 +123,11 @@ catalog. Full details (and how to add your own) in
 
 ### What's baked in (and where it comes from)
 
-Every plugin is vendored at build time from a **pinned** upstream ref (the
-versions below are the source of truth in
-[`opencode/Dockerfile`](opencode/Dockerfile)). Use the names in the **Name**
-column in `ENABLED_PLUGINS`.
+Third-party plugins are vendored at build time from a **pinned** upstream ref
+(the versions below are set in [`opencode/Dockerfile`](opencode/Dockerfile)).
+First-party plugins are copied from this repository and versioned with the
+image. Use the optional plugin names in `ENABLED_PLUGINS`; `merge-system`
+does not need an entry and cannot be disabled through that list.
 
 | Name | What it does | Upstream | Pinned |
 |------|--------------|----------|--------|
@@ -133,6 +135,7 @@ column in `ENABLED_PLUGINS`.
 | `dcp` | Dynamic context pruning — silently trims stale tool output from the context window to save tokens (no user-facing tool). | [Opencode-DCP/opencode-dynamic-context-pruning](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning) | `v3.1.12` |
 | `opencode-workspace` | `plan_save`/`plan_read` planning tools + background-agent delegation (async sub-agents). Only the two container-safe plugins are shipped. | [kdcokenny/opencode-workspace](https://github.com/kdcokenny/opencode-workspace) | `4451c68` |
 | `opencode-pty` | Interactive PTY management: run background processes in real pseudo-terminals, stream/regex-filter their output, plus a local web viewer. | [shekohex/opencode-pty](https://github.com/shekohex/opencode-pty) | `0.3.6` |
+| `merge-system` | Merges system prompt blocks into one message for the saga vLLM gateway's Qwen3.5 template. No dependencies or runtime network calls. | [First-party source](opencode/plugins/merge-system/merge-system.js) | This image's repository revision |
 
 > [!WARNING]
 > **Do not enable `opencode-workspace` if you use Qwen.** The extra tools and
@@ -140,6 +143,19 @@ column in `ENABLED_PLUGINS`.
 > fails with `AI_APICallError: Failed to communicate with the upstream service`.
 > Other models (e.g. MiniMax, Gemma) are unaffected. Leave this plugin disabled
 > when working with Qwen.
+
+### `merge-system` for saga / Qwen3.5
+
+`merge-system` is linked on every boot, even with an empty `ENABLED_PLUGINS`
+or an entry in `disabled.yaml`. It works around the gateway 500 caused by
+multiple system messages (for example, the main prompt plus
+`<date-awareness>`). The hook preserves nonblank text and its order, joins
+blocks with a blank line, and updates the existing system array in place.
+A single system block is unchanged. The hook only runs when `input.model.id`
+exactly matches the ID in the plugin's guard. The checked-in value is
+`"<model>"`; replace it with the deployment's model ID before building.
+All other or missing model IDs are a no-op. Remove the plugin once the backend
+is fixed. Compatibility with `opencode-workspace` still needs a live gateway check.
 
 ### `opencode-pty`'s web viewer
 

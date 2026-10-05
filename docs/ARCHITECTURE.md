@@ -101,7 +101,7 @@ like the browser does.
 /opt/opencode/bundle/                # workplace-shipped agents/skills/etc.
   AGENTS.md                          # global house rules (symlinked to config dir)
   agents/  skills/  commands/  mcp/  # read-only inside the image
-  plugins/<name>/                    # opt-in plugins, built+vendored at build time
+  plugins/<name>/                    # required + optional plugins, packaged at build time
 /etc/opencode/policy.yaml            # read-only workplace policy
 /etc/opencode/disabled.yaml.default  # seed for the user's toggle file
 /usr/local/share/ca-certificates/    # corp CA baked in here
@@ -231,18 +231,15 @@ a user knob — for the same reasons given above.
 Plugins (`bundle/plugins/<name>/`) are handled differently from the other
 bundle kinds in two ways:
 
-1. **Built, not checked in.** The plugin code — frequently with a
-   `node_modules/` — is cloned at a pinned ref and vendored by the
-   `plugins-build` stage of the Dockerfile, then copied into the image. The repo
-   stores only the build recipe, not the vendored code.
-2. **Opt-in (default OFF), env-var controlled.** Agents/skills/commands ship
-   enabled and are turned *off* via the `disabled:` lists in `disabled.yaml`.
-   Plugins are the opposite — opt-in — and their **single source of truth** is
-   the `ENABLED_PLUGINS` env var in `.env` (a space/comma list). `disabled.yaml`
-   deliberately does *not* control plugins: it persists in a volume and would
-   silently override `.env`. Each boot the entrypoint rebuilds the plugin
-   symlinks from scratch to match `ENABLED_PLUGINS`. The `/plugins` command shows
-   live state.
+1. **Packaged at build time.** Third-party code and dependencies are cloned
+   at pinned refs and vendored by the Dockerfile's `plugins-build` stage.
+   First-party plugins such as `merge-system` live in `opencode/plugins/`
+   and are copied into the same staging directory.
+2. **Required compatibility hook + optional plugins.** `merge-system` is
+   always on. Other plugins are opt-in via `ENABLED_PLUGINS` in `.env`
+   (a space/comma list). `disabled.yaml` does not control either kind.
+   Each boot rebuilds the managed symlinks, including `merge-system` even
+   when the optional list is empty. The `/plugins` command shows live state.
 
 **Load mechanism.** OpenCode auto-scans `plugin/*.{ts,js}` in each config dir and
 imports the matching files directly, following symlinks
@@ -255,8 +252,12 @@ resolves imports from the entry's real path, so a plugin's vendored
 
 We deliberately avoid the `plugin` array in `opencode.json`: that path triggers
 a Bun network install at startup, which the egress lock blocks. `policy.yaml`
-additionally sets `BUN_CONFIG_SKIP_INSTALL_PACKAGES=true` so no startup install
-is ever attempted. Full flow in [`ADDING_PLUGINS.md`](ADDING_PLUGINS.md).
+sets `BUN_CONFIG_SKIP_INSTALL_PACKAGES=true` and `NPM_CONFIG_OFFLINE=true`.
+The npm setting covers OpenCode 1.18.32's config dependency lookup: uncached
+packages fail immediately, so plugin loading does not wait for unreachable
+registry retries. Dependencies must already be packaged in the image or cached;
+runtime npm commands also stay offline. Full flow in
+[`ADDING_PLUGINS.md`](ADDING_PLUGINS.md).
 
 ## Git safety
 

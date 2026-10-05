@@ -34,8 +34,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
 COPY ca/ /usr/local/share/ca-certificates/corp/
 RUN update-ca-certificates
 
-# ---- Plugins build: vendor the opt-in plugins, offline-ready -----------------
-# Each plugin is cloned at a PINNED ref, built, and its runtime deps vendored,
+# ---- Plugins build: package required + opt-in plugins, offline-ready ---------
+# Third-party plugins are cloned at a PINNED ref, built, and their deps vendored,
 # then laid out under /staging/plugins/<name>/ with an `entries` manifest the
 # entrypoint reads (`<symlink-name>=<relative/entry/path>` per line). At runtime
 # OpenCode 1.16.2 auto-scans `plugin/*.{ts,js}` and imports the symlinked entry
@@ -116,6 +116,11 @@ RUN mkdir -p /build/pty && cd /build/pty \
           > /staging/plugins/opencode-pty/entries \
     && printf '%s\n' "${PTY_REF}" > /staging/plugins/opencode-pty/.baked-version
 
+# merge-system — first-party, dependency-free gateway compatibility hook.
+# Always enabled by the entrypoint and versioned with this repository. The
+# entries manifest uses the same linker as optional plugins; no npm install.
+COPY opencode/plugins/merge-system/ /staging/plugins/merge-system/
+
 # ---- MCP build: vendor first-party MCP server deps, offline-ready ------------
 # The first-party MCP servers (Bitbucket, GitLab, Jira, JFrog) are committed
 # under opencode/mcp-servers/. The loop below globs every directory, so adding a
@@ -171,9 +176,9 @@ RUN jq --arg v "${IMAGE_VERSION}" --arg ov "${OPENCODE_VERSION}" \
 # `docker run --rm <img> sed -n '/^## \[0.0.7\]/,/^## /p' /etc/opencode/CHANGELOG.md`.
 COPY CHANGELOG.md /etc/opencode/CHANGELOG.md
 
-# Opt-in plugins, built and vendored in the plugins-build stage. The entrypoint
-# symlinks the entry files of ENABLED plugins (per disabled.yaml) into the user
-# config at start. disabled.yaml.default is the seed for the user's toggle file.
+# Plugins, built and vendored in the plugins-build stage. The entrypoint
+# symlinks merge-system plus optional ENABLED_PLUGINS entries into the user
+# config at start. disabled.yaml.default controls the other bundled content.
 COPY --from=plugins-build /staging/plugins/ /opt/opencode/bundle/plugins/
 COPY opencode/disabled.yaml.default /etc/opencode/disabled.yaml.default
 
